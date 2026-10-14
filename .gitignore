@@ -1,0 +1,26 @@
+# colcon / ROS 2 build artifacts
+build/
+install/
+log/
+*.pyc
+__pycache__/
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log.latex
+*.out
+*.toc
+*.xdv
+*.synctex.gz
+# (keep main.pdf - it is a release artifact)
+
+# editor / OS
+.vscode/
+*.swp
+.DS_Store
+
+# large media goes to a release / external hosting, not git
+media/*.mp4
+media/*.mkv

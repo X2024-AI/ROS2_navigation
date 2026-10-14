@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="park_demo">
+      <!-- 1. fetch the dock pose (staging is gone: the slow stage is now a
+           distance-triggered speed zone inside DockApproach) -->
+      <GetParkingPoses staging_pose="{staging}" dock_pose="{dock}"/>
+
+      <!-- 2. approach at full speed; inside 0.8 m of the dock the speed limit
+           drops to 0.15 m/s; dock under the precise goal checker (0.05 m) -->
+      <RetryUntilSuccessful num_attempts="3">
+        <Sequence name="dock_and_verify">
+          <DockApproach goal="{dock}" bt_xml="{dock_bt}"
+                        distance_threshold="0.8" slow_speed="0.15"/>
+          <Fallback name="verify_or_adjust">
+            <!-- docked within tolerance? done. (live TF, same source as the
+                 goal checker - see CheckDocked) -->
+            <CheckDocked dock="{dock}" tolerance="0.10"/>
+            <!-- otherwise: fine adjustment - back out, then the retry
+                 re-approaches (already inside the slow zone) -->
+            <Sequence name="back_off_for_retry">
+              <Backup distance="0.25" speed="0.10"/>
+              <ForceFailure/>
+            </Sequence>
+          </Fallback>
+        </Sequence>
+      </RetryUntilSuccessful>
+    </Sequence>
+  </BehaviorTree>
+</root>
