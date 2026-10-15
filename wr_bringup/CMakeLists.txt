@@ -24,7 +24,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 install(DIRECTORY launch config behavior_tree_xml
     DESTINATION share/${PROJECT_NAME})
 
-install(PROGRAMS scripts/waypoint_patrol.py scripts/bringup_m6.sh scripts/tuck_arm_retry.sh
+install(PROGRAMS scripts/waypoint_patrol.py scripts/bringup_m6.sh scripts/tuck_arm_retry.sh scripts/odom_tf_bridge.py
   DESTINATION lib/${PROJECT_NAME})
 
 # ---- M6: behavior-tree parking nodes ----
@@ -60,13 +60,16 @@ foreach(bt_plugin ${BT_PLUGINS})
   target_compile_definitions(${bt_plugin} PRIVATE BT_PLUGIN_EXPORT)
 endforeach()
 
+add_executable(odom_tf_bridge_cpp src/odom_tf_bridge.cpp)
+ament_target_dependencies(odom_tf_bridge_cpp rclcpp geometry_msgs nav_msgs tf2_ros)
+
 add_executable(parking_bt src/parking_bt_main.cpp)
 ament_target_dependencies(parking_bt ${BT_DEPENDENCIES})
 target_link_libraries(parking_bt zmq)
 target_include_directories(parking_bt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
-install(TARGETS ${BT_PLUGINS} parking_bt
+install(TARGETS ${BT_PLUGINS} odom_tf_bridge_cpp parking_bt
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME})
