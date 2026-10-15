@@ -11,7 +11,23 @@ source /opt/ros/humble/setup.bash
 source "$WS/install/setup.bash"
 
 echo "== [1/5] simulation =="
-pkill -f "gzserver" 2>/dev/null; sleep 2
+# Idempotent teardown: leftover nav/sim processes from a previous run create
+# duplicate action servers and DDS chaos (learned 2026-10-15). Kill launch
+# PARENTS first so ros2 launch tears down its own children, then sweep.
+pkill -f "parking_[b]t"        2>/dev/null
+pkill -f "tiago_navigation[.]launch" 2>/dev/null
+pkill -f "warehouse_sim[.]launch"    2>/dev/null
+sleep 2
+pkill -f "nav2_[a-z]"          2>/dev/null
+pkill -f "lifecycle_[m]anager" 2>/dev/null
+pkill -f "topic_tool[s]/relay" 2>/dev/null
+pkill -f "gzserver" 2>/dev/null
+pkill -f "gzclient" 2>/dev/null
+sleep 3
+# Stale FastRTPS shared-memory locks (owners SIGKILLed earlier) block new DDS
+# ports with "open_and_lock_file failed". Scoped to the ROS middleware's own
+# files only, and safe because every robot process is down at this point.
+rm -rf /dev/shm/fastrtps_*
 cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
 echo "   waiting for /scan_raw + controllers ..."
 for i in $(seq 1 45); do
@@ -21,14 +37,20 @@ done
 timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" || { echo "FAIL: no /scan_raw"; exit 1; }
 
 echo "== [2/5] odometry gate =="
-if ! timeout 5 ros2 topic list 2>/dev/null | grep -q "^/odom$"; then
-  echo "   /odom missing -> starting relay"
+odom_ok() {
+  # true only if /odom has at least one PUBLISHER (topic-list alone also
+  # matches subscriber-only topics, and can come from a stale daemon cache)
+  timeout 5 ros2 topic info /odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
+}
+if ! odom_ok; then
+  echo "   /odom has no publisher -> starting relay"
   nohup ros2 run topic_tools relay /mobile_base_controller/odom /odom > /tmp/odom_relay.log 2>&1 &
 fi
-for i in $(seq 1 10); do
-  timeout 3 ros2 topic hz /odom 2>/dev/null | grep -q "average rate" && { echo "   /odom OK"; break; }
+for i in $(seq 1 15); do
+  odom_ok && { echo "   /odom OK"; break; }
   sleep 1
 done
+odom_ok || { echo "FAIL: /odom never published"; exit 1; }
 
 echo "== [3/5] Nav2 (be patient: up to 3 min under boot contention) =="
 cd "$WS" && nohup ros2 launch br2_navigation tiago_navigation.launch.py \

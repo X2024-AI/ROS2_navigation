@@ -92,6 +92,8 @@ BT::NodeStatus
 DockApproach::on_aborted()
 {
   limit_speed(100.0, true);
+  RCLCPP_WARN(node_->get_logger(), "dock navigation ABORTED (slow=%s, last dist %.2f m)",
+    slowed_ ? "yes" : "no", pose_received_ ? distance_to_goal() : -1.0);
   return BT::NodeStatus::FAILURE;
 }
 

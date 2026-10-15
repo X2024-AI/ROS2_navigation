@@ -5,7 +5,7 @@
 ![ROS 2 Humble](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros)
 ![Gazebo Classic](https://img.shields.io/badge/simulator-Gazebo%20Classic-22314E)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Status](https://img.shields.io/badge/status-M6%20demo%20pending-orange)
+![Status](https://img.shields.io/badge/status-M1--M6%20complete-brightgreen)
 
 <p align="center">
   <img src="report/figs/warehouse_map.png" width="38%"/>
@@ -116,7 +116,7 @@ latexmk -xelatex main.tex         # builds report/main.pdf (XeLaTeX + ctex)
 | M3 | Nav2 multi-goal patrol | ✅ |
 | M4 | Parameter tuning with evidence | ✅ |
 | M5 | DWB / RPP / MPPI benchmark | ✅ |
-| M6 | Behavior-tree precision docking | code complete, final demo recording pending |
+| M6 | Behavior-tree precision docking (0.074 m / 0.9° final error) | ✅ |
 | M7 | Custom controller plugin (Stanley / PID-PP) | planned |
 
 ## Lessons learned

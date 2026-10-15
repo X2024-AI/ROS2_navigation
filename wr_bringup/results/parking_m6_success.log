@@ -1,0 +1,11 @@
+[INFO] [1792031633.530158939] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792031634.542831887] [parking_bt]: "DockApproach" BtActionNode initialized
+[INFO] [1792031634.579871866] [parking_bt]: Waiting for "backup" action server
+[INFO] [1792031635.482969139] [parking_bt]: "Backup" BtActionNode initialized
+[INFO] [1792031635.484126621] [parking_bt]: parking BT started (/home/qx/Codes/Ros2/bookros2_ws/install/wr_bringup/share/wr_bringup/behavior_tree_xml/parking.xml)
+[INFO] [1792031635.484246646] [parking_bt]: parking slot: staging (1.39, -0.20), dock (2.22, -0.72)
+[INFO] [1792031635.562985602] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792031647.084415334] [parking_bt]: dock approach: 0.80 m from dock (< 0.80) -> speed limited to 0.25 m/s
+[INFO] [1792031656.584329861] [parking_bt]: dock navigation succeeded (slow=yes)
+[INFO] [1792031656.584539204] [parking_bt]: docking check: position error 0.074 m (tol 0.100), yaw error 0.016 rad
+[INFO] [1792031656.584726769] [parking_bt]: parking BT finished: SUCCESS after 21 s
