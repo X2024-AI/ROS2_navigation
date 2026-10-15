@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge /mobile_base_controller/odom -> TF odom->base_footprint.
+"""Bridge /ground_truth_odom (Gazebo physics odometry) -> TF odom->base_footprint.
 
 This machine's Gazebo sims sometimes bring up the diff-drive controller
 without its TF output (odometry topic flows, TF never appears - observed
@@ -24,7 +24,7 @@ class OdomTFBridge(Node):
         super().__init__('odom_tf_bridge')
         self.br = TransformBroadcaster(self)
         self.create_subscription(
-            Odometry, '/mobile_base_controller/odom', self.cb, 10)
+            Odometry, '/ground_truth_odom', self.cb, 10)
         self.get_logger().info('odom->base_footprint TF bridge up')
 
     def cb(self, msg):

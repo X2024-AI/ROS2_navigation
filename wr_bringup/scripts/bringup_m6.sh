@@ -3,12 +3,39 @@
 # Usage:  ./bringup_m6.sh          (sim + nav + parking demo)
 #         ./bringup_m6.sh --no-demo (stack only)
 # Gates learned the hard way on 2026-10-13:
-#   1. /odom must exist (relay from /mobile_base_controller/odom if missing)
+#   1. /odom must exist (relay from /ground_truth_odom if missing)
 #   2. lifecycle activation can take 90+ s under boot contention — poll, don't assume
 #   3. AMCL must be seeded after (re)start or every goal silently fails
 WS="${WR_WS:-$HOME/Codes/Ros2/bookros2_ws}"   # override with WR_WS if your workspace lives elsewhere
 source /opt/ros/humble/setup.bash
 source "$WS/install/setup.bash"
+
+# --- middleware "reboot": bypass the FastRTPS shared-memory transport ------
+# On hosts with long uptime / SIGKILL history the SHM layer corrupts: fresh
+# participants receive /tf bytes but listener callbacks never fire. Pure-UDP
+# transport sidesteps that layer completely (what an OS reboot would restore).
+export FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastdds_udp_only.xml
+if [ ! -f "$FASTRTPS_DEFAULT_PROFILES_FILE" ]; then
+cat > "$FASTRTPS_DEFAULT_PROFILES_FILE" <<'XML'
+<?xml version="1.0" encoding="UTF-8" ?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp_transport</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="udp_only" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>udp_transport</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>
+XML
+fi
 
 echo "== [1/5] simulation =="
 # Idempotent teardown: leftover nav/sim processes from a previous run create
@@ -24,11 +51,20 @@ pkill -f "topic_tool[s]/relay" 2>/dev/null
 pkill -f "odom_tf_[b]ridge" 2>/dev/null
 pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
+pkill -f "ros2-daemon" 2>/dev/null
 sleep 3
-# Stale FastRTPS shared-memory locks (owners SIGKILLed earlier) block new DDS
-# ports with "open_and_lock_file failed". Scoped to the ROS middleware's own
-# files only, and safe because every robot process is down at this point.
-rm -rf /dev/shm/fastrtps_*
+# --- userspace middleware reboot (everything an OS reboot would clear) -----
+# 1. FastRTPS SHM port locks: dead owners block new DDS ports
+rm -rf /dev/shm/fastrtps_* 2>/dev/null
+# 2. FastDDS named semaphores (32-hex names) whose owners are now dead
+find /dev/shm -maxdepth 1 -name 'sem.????????????????????????????????' -delete 2>/dev/null
+# 3. orphaned SysV semaphore arrays (Gazebo transport): only those whose
+#    creating process no longer exists
+ipcs -s -p 2>/dev/null | awk 'NR > 2 && NF >= 3 {print $2, $3}' | while read -r id cpid; do
+  if [ -n "$cpid" ] && ! ps -p "$cpid" > /dev/null 2>&1; then
+    ipcrm -s "$id" 2>/dev/null
+  fi
+done
 cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
 echo "   waiting for /scan_raw + controllers ..."
 for i in $(seq 1 45); do
@@ -50,7 +86,7 @@ tf_ok() {
 }
 if ! odom_ok; then
   echo "   /odom has no publisher -> starting relay"
-  nohup ros2 run topic_tools relay /mobile_base_controller/odom /odom > /tmp/odom_relay.log 2>&1 &
+  nohup ros2 run topic_tools relay /ground_truth_odom /odom > /tmp/odom_relay.log 2>&1 &
 fi
 for i in $(seq 1 15); do
   odom_ok && { echo "   /odom OK"; break; }
