@@ -12,21 +12,14 @@ namespace wr_bringup
 
 DockFrameError compute_dock_frame_error(
   const geometry_msgs::msg::PoseStamped & dock,
-  tf2_ros::Buffer & tf_buffer)
+  const tf2::Transform & map_base)
 {
   DockFrameError e;
-  geometry_msgs::msg::TransformStamped t;
-  try {
-    t = tf_buffer.lookupTransform("map", "base_footprint", tf2::TimePointZero);
-  } catch (const tf2::TransformException & ex) {
-    (void)ex;
-    return e;   // valid stays false
-  }
 
-  const double dx = t.transform.translation.x - dock.pose.position.x;
-  const double dy = t.transform.translation.y - dock.pose.position.y;
+  const double dx = map_base.getOrigin().x() - dock.pose.position.x;
+  const double dy = map_base.getOrigin().y() - dock.pose.position.y;
   const double dock_yaw = tf2::getYaw(dock.pose.orientation);
-  const double robot_yaw = tf2::getYaw(t.transform.rotation);
+  const double robot_yaw = tf2::getYaw(map_base.getRotation());
 
   e.longitudinal = dx * std::cos(dock_yaw) + dy * std::sin(dock_yaw);
   e.lateral = -dx * std::sin(dock_yaw) + dy * std::cos(dock_yaw);
@@ -34,6 +27,32 @@ DockFrameError compute_dock_frame_error(
     std::sin(robot_yaw - dock_yaw), std::cos(robot_yaw - dock_yaw));
   e.valid = true;
   return e;
+}
+
+bool compose_map_base(
+  const BT::NodeConfiguration & config,
+  tf2_ros::Buffer & tf_buffer,
+  MapOdomFreezer & freezer,
+  tf2::Transform & map_base_out)
+{
+  bool frozen = false;
+  config.blackboard->get("odom_frozen", frozen);
+
+  try {
+    if (!frozen || !freezer.cached_) {
+      // refresh the cache: latest AMCL map->odom
+      auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
+      tf2::fromMsg(m.transform, freezer.map_odom_);
+      freezer.cached_ = true;
+    }
+    auto ob = tf_buffer.lookupTransform("odom", "base_footprint", tf2::TimePointZero);
+    tf2::Transform odom_base;
+    tf2::fromMsg(ob.transform, odom_base);
+    map_base_out = freezer.map_odom_ * odom_base;
+    return true;
+  } catch (const tf2::TransformException &) {
+    return false;
+  }
 }
 
 CheckPoseTolerance::CheckPoseTolerance(
@@ -66,12 +85,13 @@ CheckPoseTolerance::tick()
   getInput("pos_tol", pos_tol);
   getInput("yaw_tol", yaw_tol);
 
-  const DockFrameError e = compute_dock_frame_error(dock, *tf_buffer_);
-  if (!e.valid) {
+  tf2::Transform map_base;
+  if (!compose_map_base(config(), *tf_buffer_, freezer_, map_base)) {
     RCLCPP_WARN(node->get_logger(), "tolerance check: TF unavailable");
     return BT::NodeStatus::FAILURE;
   }
 
+  const DockFrameError e = compute_dock_frame_error(dock, map_base);
   const double pos_err = std::hypot(e.longitudinal, e.lateral);
   RCLCPP_INFO(
     node->get_logger(),

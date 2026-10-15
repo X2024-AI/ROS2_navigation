@@ -39,11 +39,12 @@ StableDockVerify::tick()
   getInput("yaw_tol", yaw_tol);
   getInput("hold_frames", hold_frames);
 
-  const DockFrameError e = compute_dock_frame_error(dock, *tf_buffer_);
-  if (!e.valid) {
+  tf2::Transform map_base;
+  if (!compose_map_base(config(), *tf_buffer_, freezer_, map_base)) {
     good_frames_ = 0;
     return BT::NodeStatus::FAILURE;
   }
+  const DockFrameError e = compute_dock_frame_error(dock, map_base);
 
   const double pos_err = std::hypot(e.longitudinal, e.lateral);
   if (pos_err <= pos_tol && std::fabs(e.yaw) <= yaw_tol) {

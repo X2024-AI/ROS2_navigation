@@ -21,6 +21,7 @@ sleep 2
 pkill -f "nav2_[a-z]"          2>/dev/null
 pkill -f "lifecycle_[m]anager" 2>/dev/null
 pkill -f "topic_tool[s]/relay" 2>/dev/null
+pkill -f "odom_tf_[b]ridge" 2>/dev/null
 pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
 sleep 3
@@ -42,6 +43,11 @@ odom_ok() {
   # matches subscriber-only topics, and can come from a stale daemon cache)
   timeout 5 ros2 topic info /odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
 }
+tf_ok() {
+  # true if odom->base_footprint answers (the controller's TF output is
+  # sometimes missing on this machine's sims - observed 2026-10-15)
+  timeout 4 ros2 run tf2_ros tf2_echo odom base_footprint 2>/dev/null | grep -q "Translation"
+}
 if ! odom_ok; then
   echo "   /odom has no publisher -> starting relay"
   nohup ros2 run topic_tools relay /mobile_base_controller/odom /odom > /tmp/odom_relay.log 2>&1 &
@@ -51,6 +57,15 @@ for i in $(seq 1 15); do
   sleep 1
 done
 odom_ok || { echo "FAIL: /odom never published"; exit 1; }
+
+# The bridge runs UNCONDITIONALLY: the sim's native odom->base TF output
+# has been observed dying MID-SESSION (alive at boot, gone minutes later,
+# 2026-10-15). Alongside a healthy native TF it is harmless (same values);
+# when native dies, it keeps the robot alive.
+echo "   starting odom->base TF bridge"
+nohup ros2 run wr_bringup odom_tf_bridge.py > /tmp/odom_tf_bridge.log 2>&1 &
+sleep 3
+tf_ok && echo "   odom->base TF OK" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
 
 echo "== [3/5] Nav2 (be patient: up to 3 min under boot contention) =="
 cd "$WS" && nohup ros2 launch br2_navigation tiago_navigation.launch.py \

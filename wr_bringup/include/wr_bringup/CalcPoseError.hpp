@@ -7,6 +7,7 @@
 #include "behaviortree_cpp_v3/behavior_tree.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "wr_bringup/CheckPoseTolerance.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -40,6 +41,7 @@ public:
 private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  MapOdomFreezer freezer_;
 };
 
 }  // namespace wr_bringup

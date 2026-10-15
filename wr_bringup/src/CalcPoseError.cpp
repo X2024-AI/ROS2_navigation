@@ -37,11 +37,12 @@ CalcPoseError::tick()
   getInput("pos_tol", pos_tol);
   getInput("yaw_tol", yaw_tol);
 
-  const DockFrameError e = compute_dock_frame_error(dock, *tf_buffer_);
-  if (!e.valid) {
+  tf2::Transform map_base;
+  if (!compose_map_base(config(), *tf_buffer_, freezer_, map_base)) {
     RCLCPP_WARN(node->get_logger(), "error calc: TF unavailable");
     return BT::NodeStatus::FAILURE;
   }
+  const DockFrameError e = compute_dock_frame_error(dock, map_base);
 
   // Priority: largest error RELATIVE to its tolerance first (a 47 cm
   // longitudinal offset outranks a 3 cm lateral one; ordering self-selects

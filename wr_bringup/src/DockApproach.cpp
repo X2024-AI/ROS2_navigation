@@ -54,6 +54,9 @@ DockApproach::on_tick()
 
   slowed_ = false;          // fresh approach: full speed until the slow zone
   last_logged_dist_ = -1.0;
+  // micro-adjustment will measure against a frozen map->odom - AMCL would
+  // otherwise diverge during the in-place correction spins (front lidar)
+  config().blackboard->set("odom_frozen", false);
 }
 
 void
@@ -100,6 +103,7 @@ DockApproach::on_wait_for_result()
 BT::NodeStatus
 DockApproach::on_success()
 {
+  config().blackboard->set("odom_frozen", true);   // freeze for micro phase
   // restore: absolute set (idempotent, no stacking). vx is restored fully;
   // wz ends at the same value, which is adequate for subsequent navigation.
   limit_speed(0.5, false);
