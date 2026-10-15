@@ -99,7 +99,7 @@ odom_ok || { echo "FAIL: /odom never published"; exit 1; }
 # 2026-10-15). Alongside a healthy native TF it is harmless (same values);
 # when native dies, it keeps the robot alive.
 echo "   starting odom->base TF bridge"
-nohup ros2 run wr_bringup odom_tf_bridge.py > /tmp/odom_tf_bridge.log 2>&1 &
+nohup ros2 run wr_bringup odom_tf_bridge_cpp > /tmp/odom_tf_bridge.log 2>&1 &
 sleep 3
 tf_ok && echo "   odom->base TF OK" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
 
