@@ -3,6 +3,7 @@
 
 #include "wr_bringup/CheckPoseTolerance.hpp"
 
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "tf2/exceptions.h"
 #include "tf2/utils.h"
@@ -34,13 +35,21 @@ void attach_odom_source(
   const rclcpp::Node::SharedPtr & node,
   MapOdomFreezer & freezer)
 {
-  node->create_subscription<nav_msgs::msg::Odometry>(
-    "/odom", rclcpp::QoS(10),
+  freezer.odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+    "/ground_truth_odom", rclcpp::QoS(10),
     [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
       tf2::Transform ob;
       tf2::fromMsg(msg->pose.pose, ob);
       freezer.odom_base_ = ob;
       freezer.odom_received_ = true;
+    });
+  freezer.amcl_sub_ = node->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+    "/amcl_pose", rclcpp::QoS(10),
+    [&freezer](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg) {
+      tf2::Transform mb;
+      tf2::fromMsg(msg->pose.pose, mb);
+      freezer.map_base_amcl_ = mb;
+      freezer.amcl_received_ = true;
     });
 }
 
@@ -54,14 +63,17 @@ bool compose_map_base(
   config.blackboard->get("odom_frozen", frozen);
 
   if (!frozen || !freezer.cached_) {
-    // refresh the cache: latest AMCL map->odom (one-shot TF use)
-    try {
-      auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
-      tf2::fromMsg(m.transform, freezer.map_odom_);
-      freezer.cached_ = true;
-    } catch (const tf2::TransformException &) {
+    // map->odom from TOPIC samples (in-process TF proved unreliable):
+    // map->odom = (AMCL map pose) x (odom pose)^-1, both freshly received
+    if (!freezer.amcl_received_ || !freezer.odom_received_) {
+      RCLCPP_WARN(
+        config.blackboard->get<rclcpp::Node::SharedPtr>("node")->get_logger(),
+        "compose: frozen=%d amcl=%d odom=%d",
+        frozen, freezer.amcl_received_, freezer.odom_received_);
       return false;
     }
+    freezer.map_odom_ = freezer.map_base_amcl_ * freezer.odom_base_.inverse();
+    freezer.cached_ = true;
   }
   if (!freezer.odom_received_) {
     return false;   // no odometry sample yet

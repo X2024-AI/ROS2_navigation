@@ -63,13 +63,17 @@ endforeach()
 add_executable(odom_tf_bridge_cpp src/odom_tf_bridge.cpp)
 ament_target_dependencies(odom_tf_bridge_cpp rclcpp geometry_msgs nav_msgs tf2_ros)
 
+add_executable(odom_relay_cpp src/odom_relay.cpp)
+ament_target_dependencies(odom_relay_cpp rclcpp nav_msgs)
+ament_target_dependencies(odom_tf_bridge_cpp rclcpp geometry_msgs nav_msgs tf2_ros)
+
 add_executable(parking_bt src/parking_bt_main.cpp)
 ament_target_dependencies(parking_bt ${BT_DEPENDENCIES})
 target_link_libraries(parking_bt zmq)
 target_include_directories(parking_bt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
-install(TARGETS ${BT_PLUGINS} odom_tf_bridge_cpp parking_bt
+install(TARGETS ${BT_PLUGINS} odom_tf_bridge_cpp odom_relay_cpp parking_bt
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME})

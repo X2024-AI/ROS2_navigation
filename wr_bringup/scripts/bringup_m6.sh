@@ -48,6 +48,7 @@ sleep 2
 pkill -f "nav2_[a-z]"          2>/dev/null
 pkill -f "lifecycle_[m]anager" 2>/dev/null
 pkill -f "topic_tool[s]/relay" 2>/dev/null
+pkill -f "odom_[r]elay_cpp" 2>/dev/null
 pkill -f "odom_tf_[b]ridge" 2>/dev/null
 pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
@@ -67,7 +68,7 @@ ipcs -s -p 2>/dev/null | awk 'NR > 2 && NF >= 3 {print $2, $3}' | while read -r 
 done
 cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
 echo "   waiting for /scan_raw + controllers ..."
-for i in $(seq 1 45); do
+for i in $(seq 1 150); do
   sleep 2
   timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" && break
 done
@@ -86,7 +87,7 @@ tf_ok() {
 }
 if ! odom_ok; then
   echo "   /odom has no publisher -> starting relay"
-  nohup ros2 run topic_tools relay /ground_truth_odom /odom > /tmp/odom_relay.log 2>&1 &
+  nohup ros2 run wr_bringup odom_relay_cpp > /tmp/odom_relay.log 2>&1 &
 fi
 for i in $(seq 1 15); do
   odom_ok && { echo "   /odom OK"; break; }
@@ -111,14 +112,42 @@ for i in $(seq 1 90); do
   sleep 2
   [ "$(grep -c 'Managed nodes are active' /tmp/nav_launch.log)" -ge 2 ] && break
 done
-for n in map_server amcl controller_server planner_server bt_navigator; do
-  st=$(timeout 5 ros2 lifecycle get "/$n" 2>/dev/null)
-  if ! echo "$st" | grep -q "active"; then
-    echo "   $n not active ($st) -> manual transitions"
-    timeout 90 ros2 lifecycle set "/$n" configure >/dev/null 2>&1
-    timeout 90 ros2 lifecycle set "/$n" activate  >/dev/null 2>&1
-  fi
-done
+# The CLI lifecycle tool silently no-ops when service responses are lost
+# under load (and the lifecycle manager itself stalls waiting for the
+# planner's configure response). This direct python driver is robust.
+python3 - <<'PYEOF'
+import rclpy, time, sys
+from rclpy.node import Node
+from lifecycle_msgs.srv import ChangeState, GetState
+from lifecycle_msgs.msg import Transition
+
+rclpy.init()
+n = Node('lc_driver')
+def get_state(name):
+    c = n.create_client(GetState, f'/{name}/get_state')
+    if not c.wait_for_service(timeout_sec=5.0): return None
+    fut = c.call_async(GetState.Request()); t0 = time.time()
+    while not fut.done() and time.time()-t0 < 10:
+        rclpy.spin_once(n, timeout_sec=0.3)
+    return fut.result().current_state.id if fut.done() else None
+def drive(name, tr, label):
+    c = n.create_client(ChangeState, f'/{name}/change_state')
+    if not c.wait_for_service(timeout_sec=5.0): return
+    req = ChangeState.Request(); req.transition.id = tr
+    fut = c.call_async(req); t0 = time.time()
+    while not fut.done() and time.time()-t0 < 60:
+        rclpy.spin_once(n, timeout_sec=0.5)
+for name in ['map_server', 'amcl', 'controller_server', 'planner_server',
+             'smoother_server', 'behavior_server', 'waypoint_follower',
+             'velocity_smoother', 'bt_navigator']:
+    for attempt in range(3):
+        st = get_state(name)
+        if st == 3: break
+        if st == 1: drive(name, Transition.TRANSITION_CONFIGURE, 'configure')
+        if st in (1, 2): drive(name, Transition.TRANSITION_ACTIVATE, 'activate')
+    print(f"{name}: state={get_state(name)}")
+rclpy.shutdown()
+PYEOF
 echo "   lifecycle states:"
 for n in map_server amcl controller_server planner_server bt_navigator; do
   echo "     $n: $(timeout 5 ros2 lifecycle get /$n 2>/dev/null)"

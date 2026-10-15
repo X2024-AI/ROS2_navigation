@@ -7,6 +7,7 @@
 #include "behaviortree_cpp_v3/behavior_tree.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/subscription_base.hpp"
 #include "tf2/LinearMath/Transform.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -43,6 +44,16 @@ public:
   // live odom->base from the /odom topic (updated by subscription)
   tf2::Transform odom_base_;
   bool odom_received_{false};
+
+  // latest AMCL map-frame pose from the /amcl_pose topic
+  tf2::Transform map_base_amcl_;
+  bool amcl_received_{false};
+
+  // KEEP the subscription objects alive: an unstored create_subscription
+  // return value is destroyed immediately (node holds only weak refs) and
+  // the callbacks never fire
+  rclcpp::SubscriptionBase::SharedPtr odom_sub_;
+  rclcpp::SubscriptionBase::SharedPtr amcl_sub_;
 };
 
 // Build the current map->base transform for a node: frozen map->odom
