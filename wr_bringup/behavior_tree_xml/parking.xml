@@ -11,16 +11,18 @@
       <RetryUntilSuccessful num_attempts="3">
         <Sequence name="dock_and_verify">
           <DockApproach goal="{dock}" bt_xml="{dock_bt}"
-                        distance_threshold="0.8" slow_speed="0.15"/>
+                        distance_threshold="0.8" slow_speed="0.25"/>
           <Fallback name="verify_or_adjust">
             <!-- docked within tolerance? done. (live TF, same source as the
                  goal checker - see CheckDocked) -->
             <CheckDocked dock="{dock}" tolerance="0.10"/>
             <!-- otherwise: fine adjustment - back out, then the retry
-                 re-approaches (already inside the slow zone) -->
+                 re-approaches (already inside the slow zone).
+                 AlwaysFailure (built-in leaf) makes the sequence FAIL after
+                 backing out, which is what triggers the parent retry. -->
             <Sequence name="back_off_for_retry">
               <Backup distance="0.25" speed="0.10"/>
-              <ForceFailure/>
+              <AlwaysFailure/>
             </Sequence>
           </Fallback>
         </Sequence>
