@@ -29,19 +29,28 @@ DockFrameError compute_dock_frame_error(
   const tf2::Transform & map_base);
 
 // During micro-adjustment the blackboard flag "odom_frozen" is true: measure
-// against a CACHED map->odom composed with live odom->base. AMCL diverges
-// during fast in-place spins (front lidar), which otherwise exactly cancels
-// the correction being measured - an unbounded spin feedback loop.
+// against a CACHED map->odom composed with the live odometry POSE taken from
+// the /odom TOPIC (topic streams to persistent subscribers are reliable on
+// this host; in-process TF listeners proved not to be). AMCL diverges during
+// fast in-place spins (front lidar), which otherwise exactly cancels the
+// correction being measured - an unbounded spin feedback loop.
 class MapOdomFreezer
 {
 public:
   tf2::Transform map_odom_;   // cached map->odom
   bool cached_{false};
+
+  // live odom->base from the /odom topic (updated by subscription)
+  tf2::Transform odom_base_;
+  bool odom_received_{false};
 };
 
 // Build the current map->base transform for a node: frozen map->odom
-// composed with live odom->base when the blackboard says to freeze,
-// otherwise a direct (live) lookup.
+// composed with the topic-sourced live odometry pose.
+void attach_odom_source(
+  const rclcpp::Node::SharedPtr & node,
+  MapOdomFreezer & freezer);
+
 bool compose_map_base(
   const BT::NodeConfiguration & config,
   tf2_ros::Buffer & tf_buffer,

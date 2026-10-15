@@ -23,6 +23,7 @@ StableDockVerify::StableDockVerify(
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, false);
   }
+  attach_odom_source(node, freezer_);
 }
 
 BT::NodeStatus
