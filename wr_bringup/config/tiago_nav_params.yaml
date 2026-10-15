@@ -130,8 +130,8 @@ controller_server:
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker", "precise_goal_checker"]
-    controller_plugins: ["FollowPath", "FollowPathRPP", "FollowPathMPPI"]
+    goal_checker_plugins: ["general_goal_checker", "precise_goal_checker", "approach_goal_checker"]
+    controller_plugins: ["FollowPath", "FollowPathRPP", "FollowPathMPPI", "FollowPathMPPI_cautious"]
 
     # Progress checker parameters
     progress_checker:
@@ -143,6 +143,11 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.05
       yaw_goal_tolerance: 0.10
+      stateful: True
+    approach_goal_checker:                     # M6 phase 1: get NEAR the dock;
+      plugin: "nav2_controller::SimpleGoalChecker"   # the BT micro-loop closes
+      xy_goal_tolerance: 0.05                        # the last centimetres
+      yaw_goal_tolerance: 0.15
       stateful: True
     general_goal_checker:
       stateful: True
@@ -226,6 +231,84 @@ controller_server:
       vy_std: 0.05
       wz_std: 0.4
       vx_max: 0.5
+      vx_min: -0.35
+      vy_max: 0.5
+      wz_max: 1.0
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_max: 3.0
+      az_max: 3.5
+      iteration_count: 1
+      prune_distance: 1.7
+      transform_tolerance: 0.1
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "DiffDrive"
+      visualize: false
+      regenerate_noises: true
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      critics: ["ConstraintCritic", "ObstaclesCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 3.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 3.0
+        threshold_to_consider: 0.5
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 5.0
+        threshold_to_consider: 0.5
+      ObstaclesCritic:
+        enabled: true
+        cost_power: 1
+        repulsion_weight: 1.5
+        critical_cost: 300.0
+        consider_footprint: false
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 80.0
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        trajectory_header_step: 5
+        trajectory_point_step: 2
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 25.0
+        offset_from_furthest: 6
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_gain: 50.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        mode: 0
+
+    # --- M6: cautious MPPI for docking (slow LINEAR, free rotation ---
+    # absolute SpeedLimit clamps wz too, which deadlocks off-axis docking;
+    # a dedicated plugin caps vx without touching wz)
+    FollowPathMPPI_cautious:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 1000
+      vx_std: 0.2
+      vy_std: 0.05
+      wz_std: 0.4
+      vx_max: 0.25
       vx_min: -0.35
       vy_max: 0.5
       wz_max: 1.0

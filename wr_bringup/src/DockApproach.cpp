@@ -3,8 +3,6 @@
 
 #include "wr_bringup/DockApproach.hpp"
 
-#include "nav2_msgs/msg/speed_limit.hpp"
-
 namespace wr_bringup
 {
 
@@ -54,53 +52,75 @@ DockApproach::on_tick()
   getInput("bt_xml", bt_xml);
   goal_.behavior_tree = bt_xml;
 
-  slowed_ = false;   // fresh approach: full speed until the slow zone
+  slowed_ = false;          // fresh approach: full speed until the slow zone
+  last_logged_dist_ = -1.0;
 }
 
 void
 DockApproach::on_wait_for_result()
 {
-  if (slowed_ || !pose_received_) {
+  if (!pose_received_) {
     return;
   }
 
-  double threshold = 1.5, slow_speed = 0.15;
+  const double dist = distance_to_goal();
+
+  // progress trace at ~5 cm resolution (called every BT tick)
+  if (last_logged_dist_ < 0.0 || std::fabs(last_logged_dist_ - dist) > 0.05) {
+    last_logged_dist_ = dist;
+    RCLCPP_INFO(node_->get_logger(), "dock approach: %.2f m from dock", dist);
+  }
+
+  if (slowed_) {
+    return;
+  }
+  double threshold = 1.0, slow_speed = 0.25;
   getInput("distance_threshold", threshold);
   getInput("slow_speed", slow_speed);
-
-  const double dist = distance_to_goal();
   if (dist < threshold) {
-    limit_speed(slow_speed, false);   // absolute m/s
     slowed_ = true;
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "dock approach: %.2f m from dock (< %.2f) -> speed limited to %.2f m/s",
-      dist, threshold, slow_speed);
+    if (slow_speed > 0.0) {
+      // optional: absolute SpeedLimit. NOTE nav2's absolute limit also clamps
+      // wz, which can dither MPPI's terminal phase off-axis - leave 0 to
+      // slow down via a cautious controller plugin instead.
+      limit_speed(slow_speed, false);
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "dock approach: %.2f m (< %.2f) -> speed limited to %.2f m/s",
+        dist, threshold, slow_speed);
+    } else {
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "dock approach: %.2f m (< %.2f) -> creep zone (slow controller)",
+        dist, threshold);
+    }
   }
 }
 
 BT::NodeStatus
 DockApproach::on_success()
 {
-  limit_speed(100.0, true);   // restore full speed
-  RCLCPP_INFO(node_->get_logger(), "dock navigation succeeded (slow=%s)",
-    slowed_ ? "yes" : "no");
+  // restore: absolute set (idempotent, no stacking). vx is restored fully;
+  // wz ends at the same value, which is adequate for subsequent navigation.
+  limit_speed(0.5, false);
+  RCLCPP_INFO(node_->get_logger(), "dock navigation succeeded (%.2f m from dock)",
+    pose_received_ ? distance_to_goal() : -1.0);
   return BT::NodeStatus::SUCCESS;
 }
 
 BT::NodeStatus
 DockApproach::on_aborted()
 {
-  limit_speed(100.0, true);
-  RCLCPP_WARN(node_->get_logger(), "dock navigation ABORTED (slow=%s, last dist %.2f m)",
-    slowed_ ? "yes" : "no", pose_received_ ? distance_to_goal() : -1.0);
+  limit_speed(0.5, false);
+  RCLCPP_WARN(node_->get_logger(), "dock navigation ABORTED (%.2f m from dock)",
+    pose_received_ ? distance_to_goal() : -1.0);
   return BT::NodeStatus::FAILURE;
 }
 
 BT::NodeStatus
 DockApproach::on_cancelled()
 {
-  limit_speed(100.0, true);
+  limit_speed(0.5, false);
   return BT::NodeStatus::SUCCESS;
 }
 

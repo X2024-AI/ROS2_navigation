@@ -15,11 +15,13 @@
 namespace wr_bringup
 {
 
-// NavigateToPose to the dock with a distance-triggered slow-approach zone:
+// Full-speed NavigateToPose to the dock with a distance-triggered slow zone:
 // while the action runs, the node watches the AMCL pose; once the robot is
 // within `distance_threshold` of the dock it publishes an absolute speed
-// limit on /speed_limit, and restores full speed when the action ends.
-// (This replaces a fixed staging pose: the "slow stage" is a radius, not a point.)
+// limit `slow_speed` on /speed_limit (note: nav2's absolute limit clamps
+// wz too - acceptable here because the closed-loop MicroAdjustment phase
+// that follows runs on behavior_server actions, which are unaffected).
+// Logs approach progress at ~0.05 m resolution.
 class DockApproach : public wr_bringup::BtActionNode<nav2_msgs::action::NavigateToPose>
 {
 public:
@@ -38,9 +40,9 @@ public:
   {
     return {
       BT::InputPort<geometry_msgs::msg::PoseStamped>("goal", "dock pose"),
-      BT::InputPort<std::string>("bt_xml", "", "Nav2-side BT (precise checker)"),
-      BT::InputPort<double>("distance_threshold", 1.5, "slow zone radius in metres"),
-      BT::InputPort<double>("slow_speed", 0.15, "absolute speed limit in m/s")
+      BT::InputPort<std::string>("bt_xml", "", "Nav2-side BT for this goal"),
+      BT::InputPort<double>("distance_threshold", 1.0, "slow zone radius in metres"),
+      BT::InputPort<double>("slow_speed", 0.25, "absolute speed limit in m/s inside the zone")
     };
   }
 
@@ -55,6 +57,7 @@ private:
   geometry_msgs::msg::PoseWithCovarianceStamped last_pose_;
   bool pose_received_{false};
   bool slowed_{false};
+  double last_logged_dist_{-1.0};
 };
 
 }  // namespace wr_bringup

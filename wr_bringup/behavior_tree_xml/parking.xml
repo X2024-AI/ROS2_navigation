@@ -2,30 +2,48 @@
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
     <Sequence name="park_demo">
-      <!-- 1. fetch the dock pose (staging is gone: the slow stage is now a
-           distance-triggered speed zone inside DockApproach) -->
-      <GetParkingPoses staging_pose="{staging}" dock_pose="{dock}"/>
+      <!-- 0. fetch the dock pose -->
+      <GetDockPose dock_pose="{dock_final_pose}"/>
 
-      <!-- 2. approach at full speed; inside 0.8 m of the dock the speed limit
-           drops to 0.15 m/s; dock under the precise goal checker (0.05 m) -->
       <RetryUntilSuccessful num_attempts="3">
-        <Sequence name="dock_and_verify">
-          <DockApproach goal="{dock}" bt_xml="{dock_bt}"
-                        distance_threshold="0.8" slow_speed="0.25"/>
-          <Fallback name="verify_or_adjust">
-            <!-- docked within tolerance? done. (live TF, same source as the
-                 goal checker - see CheckDocked) -->
-            <CheckDocked dock="{dock}" tolerance="0.10"/>
-            <!-- otherwise: fine adjustment - back out, then the retry
-                 re-approaches (already inside the slow zone).
-                 AlwaysFailure (built-in leaf) makes the sequence FAIL after
-                 backing out, which is what triggers the parent retry. -->
-            <Sequence name="back_off_for_retry">
-              <Backup distance="0.25" speed="0.10"/>
-              <AlwaysFailure/>
-            </Sequence>
-          </Fallback>
-        </Sequence>
+        <Fallback name="dock_or_backoff">
+
+          <!-- precision docking: creep approach -> closed-loop micro
+               adjustment -> stable verification -->
+          <Sequence name="precision_docking">
+
+            <!-- (1) full-speed approach, auto slow-down inside 1.0 m -->
+            <DockApproach goal="{dock_final_pose}" bt_xml="{dock_bt}"
+                          distance_threshold="1.0" slow_speed="0.0"/>
+
+            <!-- (2) closed-loop micro pose adjustment -->
+            <RetryUntilSuccessful num_attempts="5">
+              <Fallback name="check_or_correct">
+                <CheckPoseTolerance dock="{dock_final_pose}"
+                                    pos_tol="0.02" yaw_tol="0.00873"/>
+                <Sequence name="corrective_action">
+                  <CalcPoseError dock="{dock_final_pose}"
+                                 pos_tol="0.02" yaw_tol="0.00873"
+                                 correction="{corr}" magnitude="{corr_mag}"/>
+                  <MicroAdjustment correction="{corr}" magnitude="{corr_mag}"
+                                   pos_tol="0.02" yaw_tol="0.00873" speed="0.05"/>
+                </Sequence>
+              </Fallback>
+            </RetryUntilSuccessful>
+
+            <!-- (3) stable final verification: 5 consecutive good frames -->
+            <StableDockVerify dock="{dock_final_pose}"
+                              pos_tol="0.02" yaw_tol="0.00873" hold_frames="5"/>
+
+          </Sequence>
+
+          <!-- docking failed: back off, let the outer retry re-approach -->
+          <Sequence name="back_off_for_retry">
+            <Backup distance="0.3" speed="0.1"/>
+            <AlwaysFailure/>
+          </Sequence>
+
+        </Fallback>
       </RetryUntilSuccessful>
     </Sequence>
   </BehaviorTree>

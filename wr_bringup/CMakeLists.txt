@@ -32,18 +32,26 @@ set(BT_DEPENDENCIES
   rclcpp rclcpp_action behaviortree_cpp_v3 action_msgs geometry_msgs
   nav2_msgs ament_index_cpp tf2 tf2_ros tf2_geometry_msgs)
 
-add_library(wr_get_parking_poses_bt_node SHARED src/GetParkingPoses.cpp)
+add_library(wr_get_dock_pose_bt_node SHARED src/GetDockPose.cpp)
 add_library(wr_move_to_pose_bt_node SHARED src/MoveToPose.cpp)
 add_library(wr_check_docked_bt_node SHARED src/CheckDocked.cpp)
 add_library(wr_dock_approach_bt_node SHARED src/DockApproach.cpp)
 add_library(wr_backup_bt_node SHARED src/Backup.cpp)
+add_library(wr_check_pose_tol_bt_node SHARED src/CheckPoseTolerance.cpp)
+add_library(wr_calc_pose_error_bt_node SHARED src/CalcPoseError.cpp)
+add_library(wr_micro_adjust_bt_node SHARED src/MicroAdjustment.cpp)
+add_library(wr_stable_verify_bt_node SHARED src/StableDockVerify.cpp)
 
 set(BT_PLUGINS
-  wr_get_parking_poses_bt_node
+  wr_get_dock_pose_bt_node
   wr_move_to_pose_bt_node
   wr_check_docked_bt_node
   wr_dock_approach_bt_node
-  wr_backup_bt_node)
+  wr_backup_bt_node
+  wr_check_pose_tol_bt_node
+  wr_calc_pose_error_bt_node
+  wr_micro_adjust_bt_node
+  wr_stable_verify_bt_node)
 
 foreach(bt_plugin ${BT_PLUGINS})
   ament_target_dependencies(${bt_plugin} ${BT_DEPENDENCIES})
