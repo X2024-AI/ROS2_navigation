@@ -66,13 +66,35 @@ ipcs -s -p 2>/dev/null | awk 'NR > 2 && NF >= 3 {print $2, $3}' | while read -r 
     ipcrm -s "$id" 2>/dev/null
   fi
 done
-cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
-echo "   waiting for /scan_raw + controllers ..."
-for i in $(seq 1 150); do
-  sleep 2
-  timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" && break
-done
-timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" || { echo "FAIL: no /scan_raw"; exit 1; }
+wait_for_scan() {
+  # the TIAGo sim cold-boot takes 3-8 min under desktop load (gzserver
+  # ~175% CPU while loading world/controllers/MoveIt); ~1 in 5 launches is
+  # a dud whose laser never appears and needs a relaunch
+  local waited=0
+  while [ $waited -lt 480 ]; do
+    sleep 4; waited=$((waited+4))
+    if timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$"; then
+      echo "   /scan_raw up after ${waited}s"
+      return 0
+    fi
+    [ $((waited % 60)) -eq 0 ] && echo "   still booting... ${waited}s (normal: 3-8 min under load)"
+  done
+  return 1
+}
+
+launch_sim() {
+  cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
+}
+
+launch_sim
+if ! wait_for_scan; then
+  echo "   no laser after 8 min - dud instance, relaunching the sim once..."
+  pkill -f "gzserver" 2>/dev/null; pkill -f "gzclient" 2>/dev/null
+  sleep 5
+  rm -rf /dev/shm/fastrtps_* 2>/dev/null
+  launch_sim
+  wait_for_scan || { echo "FAIL: no /scan_raw even after relaunch"; exit 1; }
+fi
 
 echo "== [2/5] odometry gate =="
 odom_ok() {
@@ -162,6 +184,40 @@ for i in 1 2 3; do
 done
 
 if [ "${1:-}" = "--no-demo" ]; then echo "== stack ready (no demo) =="; exit 0; fi
+
+# Reuse an already-running healthy stack (brought up with --no-demo) and
+# only re-seed + rerun the demo: fast iteration inside one sim window.
+if [ "${1:-}" = "--demo-only" ]; then
+  echo "== demo-only (reusing running stack) =="
+  timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" || { echo "FAIL: no running stack (see --no-demo)"; exit 1; }
+  POSE=$(python3 - <<'PYEOF'
+import rclpy, math, time
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+rclpy.init()
+n = Node('seed_reader'); m = [None]
+n.create_subscription(Odometry, '/odom', lambda x: m.__setitem__(0, x), 10)
+t0 = time.time()
+while m[0] is None and time.time()-t0 < 8:
+    rclpy.spin_once(n, timeout_sec=0.5)
+rclpy.shutdown()
+if m[0]:
+    p = m[0].pose.pose.position; o = m[0].pose.pose.orientation
+    yaw = 2*math.atan2(o.z, o.w)
+    print(f"{p.x:.3f} {p.y:.3f} {math.sin(yaw/2):.4f} {math.cos(yaw/2):.4f}")
+PYEOF
+)
+  set -- $POSE
+  if [ -n "$1" ]; then
+    timeout 20 ros2 topic pub --once /initialpose geometry_msgs/PoseWithCovarianceStamped \
+      "{header: {frame_id: map}, pose: {pose: {position: {x: $1, y: $2}, orientation: {z: $3, w: $4}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}" \
+      >/dev/null 2>&1 && echo "   seeded from odom ($1, $2)"
+  fi
+  P=$(ss -tlnp 2>/dev/null | grep 2666 | grep -oP 'pid=\K[0-9]+' | head -1)
+  [ -n "$P" ] && kill -9 "$P"
+  cd "$WS" && ros2 run wr_bringup parking_bt 2>&1 | tee "$WS/src/wr_bringup/results/parking_m6.log"
+  exit $?
+fi
 
 echo "== [5/5] parking demo =="
 # Optional custom parking slot ( metres, metres, radians ):
