@@ -22,6 +22,17 @@ MicroAdjustment::MicroAdjustment(
     node, "backup");
   spin_client_ = rclcpp_action::create_client<nav2_msgs::action::Spin>(
     node, "spin");
+
+  vel_pub_ = node->create_publisher<geometry_msgs::msg::Twist>("/key_vel", 10);
+  auto yaw_cb =
+    [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+      if (spin_active_) {
+        const auto & o = msg->pose.pose.orientation;
+        spin_yaw_ = 2.0 * std::atan2(o.z, o.w);
+      }
+    };
+  spin_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+    "/odom", rclcpp::QoS(10), yaw_cb);
 }
 
 void
@@ -82,10 +93,11 @@ MicroAdjustment::start_step()
   getInput("speed", speed);
 
   if (current_.type == Step::Type::SPIN) {
-    auto goal = nav2_msgs::action::Spin::Goal();
-    goal.target_yaw = static_cast<float>(current_.value);
-    goal.time_allowance.sec = 15;
-    spin_accept_fut_ = spin_client_->async_send_goal(goal);
+    // direct execution: behavior-server Spin aborts on collision checks
+    spin_active_ = true;
+    spin_start_yaw_ = spin_yaw_;
+    phase_ = Phase::AWAIT_RESULT;   // poll_step handles completion below
+    return BT::NodeStatus::RUNNING;
   } else if (current_.type == Step::Type::DRIVE) {
     auto goal = nav2_msgs::action::DriveOnHeading::Goal();
     goal.target.x = current_.value;
@@ -102,6 +114,7 @@ MicroAdjustment::start_step()
 
   step_t0_ = node->now();
   result_arrived_ = false;
+  status_polling_ = false;
   phase_ = Phase::AWAIT_ACCEPT;
   return BT::NodeStatus::RUNNING;
 }
@@ -111,6 +124,28 @@ MicroAdjustment::poll_step()
 {
   rclcpp::Node::SharedPtr node;
   config().blackboard->get("node", node);
+
+  // direct-rotation steps: close the loop on our own odometry
+  if (current_.type == Step::Type::SPIN && spin_active_) {
+    double delta = spin_yaw_ - spin_start_yaw_;
+    delta = std::atan2(std::sin(delta), std::cos(delta));
+    if (std::fabs(delta) >= std::fabs(current_.value) - 0.004 ||
+      (node->now() - step_t0_).seconds() > 20.0)
+    {
+      geometry_msgs::msg::Twist zero;
+      vel_pub_->publish(zero);
+      spin_active_ = false;
+      RCLCPP_INFO(
+        node->get_logger(), "micro spin done: %.3f/%.3f rad",
+        delta, current_.value);
+      phase_ = Phase::IDLE;
+      return BT::NodeStatus::RUNNING;   // next step (or drain)
+    }
+    geometry_msgs::msg::Twist t;
+    t.angular.z = (current_.value > 0 ? 0.3 : -0.3);
+    vel_pub_->publish(t);
+    return BT::NodeStatus::RUNNING;
+  }
 
   // phase 1: goal acceptance (non-blocking)
   if (phase_ == Phase::AWAIT_ACCEPT) {
@@ -166,10 +201,8 @@ MicroAdjustment::poll_step()
       return BT::NodeStatus::RUNNING;
     }
     spin_result_fut_.get();
-    // the result arriving IS the terminal signal; the client's status-topic
-    // view can lag or never update for sub-second goals, and the closed loop
-    // re-measures the true error next cycle anyway
-    status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
+    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
+    status = spin_handle_->get_status();
   } else if (current_.type == Step::Type::DRIVE && drive_handle_) {
     if (!drive_result_fut_.valid()) {
       drive_result_fut_ = drive_client_->async_get_result(drive_handle_);
@@ -179,10 +212,8 @@ MicroAdjustment::poll_step()
       return BT::NodeStatus::RUNNING;
     }
     drive_result_fut_.get();
-    // the result arriving IS the terminal signal; the client's status-topic
-    // view can lag or never update for sub-second goals, and the closed loop
-    // re-measures the true error next cycle anyway
-    status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
+    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
+    status = drive_handle_->get_status();
   } else if (current_.type == Step::Type::BACK && backup_handle_) {
     if (!backup_result_fut_.valid()) {
       backup_result_fut_ = backup_client_->async_get_result(backup_handle_);
@@ -192,12 +223,24 @@ MicroAdjustment::poll_step()
       return BT::NodeStatus::RUNNING;
     }
     backup_result_fut_.get();
-    // the result arriving IS the terminal signal; the client's status-topic
-    // view can lag or never update for sub-second goals, and the closed loop
-    // re-measures the true error next cycle anyway
-    status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
+    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
+    status = backup_handle_->get_status();
   } else {
     return BT::NodeStatus::RUNNING;
+  }
+
+  const bool status_terminal =
+    status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED ||
+    status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
+    status == action_msgs::msg::GoalStatus::STATUS_CANCELED;
+  if (!status_terminal) {
+    if ((node->now() - status_t0_).seconds() < 2.0) {
+      return BT::NodeStatus::RUNNING;   // status topic lagging the result
+    }
+    RCLCPP_WARN(
+      node->get_logger(),
+      "micro step: status never arrived (last %d) - assuming success", status);
+    status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
   }
 
   spin_handle_ = nullptr;

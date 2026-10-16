@@ -10,6 +10,8 @@
 #include "nav2_msgs/action/back_up.hpp"
 #include "nav2_msgs/action/drive_on_heading.hpp"
 #include "nav2_msgs/action/spin.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
@@ -86,8 +88,19 @@ private:
   rclcpp_action::ClientGoalHandle<nav2_msgs::action::BackUp>::SharedPtr backup_handle_;
   rclcpp_action::ClientGoalHandle<nav2_msgs::action::Spin>::SharedPtr spin_handle_;
 
+  // direct rotation (behavior-server Spin aborts on costmap collision
+  // checks near the dock): publish on the twist-mux keyboard input and
+  // close the loop on our own odometry sample
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
+  rclcpp::SubscriptionBase::SharedPtr spin_odom_sub_;
+  double spin_start_yaw_{0.0};
+  double spin_yaw_{0.0};
+  bool spin_active_{false};
+
   rclcpp::Time step_t0_;
-  bool result_arrived_{false};   // result future done; give the status topic
+  bool result_arrived_{false};
+  bool status_polling_{false};
+  rclcpp::Time status_t0_;   // result future done; give the status topic
   // one extra spin cycle before trusting get_status()
 };
 

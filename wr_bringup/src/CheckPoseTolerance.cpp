@@ -36,7 +36,7 @@ void attach_odom_source(
   MapOdomFreezer & freezer)
 {
   freezer.odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    "/ground_truth_odom", rclcpp::QoS(10),
+    "/odom", rclcpp::QoS(10),   // C++ relay: Gazebo->persistent-sub links stall after 1 msg
     [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
       tf2::Transform ob;
       tf2::fromMsg(msg->pose.pose, ob);
