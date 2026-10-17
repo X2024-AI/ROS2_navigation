@@ -69,10 +69,16 @@ int main(int argc, char * argv[])
   rclcpp::Rate rate(10);
   bool ok = false;
   while (rclcpp::ok()) {
-    const BT::NodeStatus st = tree.rootNode()->executeTick();
-    rclcpp::spin_some(node);
-    if (st == BT::NodeStatus::SUCCESS) {ok = true; break;}
-    if (st == BT::NodeStatus::FAILURE) {break;}
+    try {
+      const BT::NodeStatus st = tree.rootNode()->executeTick();
+      rclcpp::spin_some(node);
+      if (st == BT::NodeStatus::SUCCESS) {ok = true; break;}
+      if (st == BT::NodeStatus::FAILURE) {break;}
+    } catch (const std::exception & e) {
+      // a transient clock/QoS exception must not kill a live demo - log
+      // and let the tree retry on the next tick
+      RCLCPP_WARN(node->get_logger(), "tick exception (continuing): %s", e.what());
+    }
     rate.sleep();
   }
 

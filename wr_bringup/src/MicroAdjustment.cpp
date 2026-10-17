@@ -26,10 +26,11 @@ MicroAdjustment::MicroAdjustment(
   vel_pub_ = node->create_publisher<geometry_msgs::msg::Twist>("/key_vel", 10);
   auto yaw_cb =
     [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-      if (spin_active_) {
-        const auto & o = msg->pose.pose.orientation;
-        spin_yaw_ = 2.0 * std::atan2(o.z, o.w);
-      }
+      // ALWAYS update: the spin start reference must be the fresh pose,
+      // not a value gated on spin_active_ (which once left it stale and
+      // completed a step instantly with 6x overshoot)
+      const auto & o = msg->pose.pose.orientation;
+      spin_yaw_ = 2.0 * std::atan2(o.z, o.w);
     };
   spin_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
     "/odom", rclcpp::QoS(10), yaw_cb);
@@ -94,6 +95,9 @@ MicroAdjustment::start_step()
 
   if (current_.type == Step::Type::SPIN) {
     // direct execution: behavior-server Spin aborts on collision checks
+    step_t0_ = node->now();   // BEFORE the early return: node clock is
+    // RCL_ROS_TIME; an unassigned (system-time) member would throw on the
+    // timeout subtraction every tick
     spin_active_ = true;
     spin_start_yaw_ = spin_yaw_;
     phase_ = Phase::AWAIT_RESULT;   // poll_step handles completion below

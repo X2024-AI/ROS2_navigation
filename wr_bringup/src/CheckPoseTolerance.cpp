@@ -36,12 +36,22 @@ void attach_odom_source(
   MapOdomFreezer & freezer)
 {
   freezer.odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    "/odom", rclcpp::QoS(10),   // C++ relay: Gazebo->persistent-sub links stall after 1 msg
+    "/odom", rclcpp::QoS(10),
     [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
       tf2::Transform ob;
       tf2::fromMsg(msg->pose.pose, ob);
       freezer.odom_base_ = ob;
       freezer.odom_received_ = true;
+      freezer.odom_stamp_ = rclcpp::Time(msg->header.stamp);
+    });
+  freezer.odom2_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+    "/ground_truth_odom", rclcpp::QoS(10),
+    [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+      tf2::Transform ob;
+      tf2::fromMsg(msg->pose.pose, ob);
+      freezer.odom_base2_ = ob;
+      freezer.odom2_received_ = true;
+      freezer.odom2_stamp_ = rclcpp::Time(msg->header.stamp);
     });
   freezer.amcl_sub_ = node->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "/amcl_pose", rclcpp::QoS(10),
@@ -63,8 +73,28 @@ bool compose_map_base(
   config.blackboard->get("odom_frozen", frozen);
 
   if (!frozen || !freezer.cached_) {
-    // map->odom from TOPIC samples (in-process TF proved unreliable):
-    // map->odom = (AMCL map pose) x (odom pose)^-1, both freshly received
+    // map->odom primary source: topic samples (amcl_pose x odom^-1).
+    // Fallback for standstill starts (no motion -> no /amcl_pose publish):
+    // the shared TF buffer's map->odom (AMCL publishes it on /tf).
+    if (!freezer.amcl_received_) {
+      try {
+        auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
+        tf2::Transform map_odom;
+        tf2::fromMsg(m.transform, map_odom);
+        // synthesize the AMCL-side sample from the current odom pose
+        if (freezer.odom2_received_ &&
+          (!freezer.odom_received_ || freezer.odom2_stamp_ > freezer.odom_stamp_))
+        {
+          freezer.map_base_amcl_ = map_odom * freezer.odom_base2_;
+          freezer.amcl_received_ = true;
+        } else if (freezer.odom_received_) {
+          freezer.map_base_amcl_ = map_odom * freezer.odom_base_;
+          freezer.amcl_received_ = true;
+        }
+      } catch (const tf2::TransformException &) {
+        // no TF either - the diagnostics below will say so
+      }
+    }
     if (!freezer.amcl_received_ || !freezer.odom_received_) {
       RCLCPP_WARN(
         config.blackboard->get<rclcpp::Node::SharedPtr>("node")->get_logger(),
@@ -75,10 +105,15 @@ bool compose_map_base(
     freezer.map_odom_ = freezer.map_base_amcl_ * freezer.odom_base_.inverse();
     freezer.cached_ = true;
   }
-  if (!freezer.odom_received_) {
+  if (!freezer.odom_received_ && !freezer.odom2_received_) {
     return false;   // no odometry sample yet
   }
-  map_base_out = freezer.map_odom_ * freezer.odom_base_;
+  // freshest source wins
+  const tf2::Transform & ob =
+    (freezer.odom2_received_ &&
+    (!freezer.odom_received_ || freezer.odom2_stamp_ > freezer.odom_stamp_))
+    ? freezer.odom_base2_ : freezer.odom_base_;
+  map_base_out = freezer.map_odom_ * ob;
   return true;
 }
 

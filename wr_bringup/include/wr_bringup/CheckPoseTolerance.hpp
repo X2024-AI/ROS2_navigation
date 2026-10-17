@@ -41,9 +41,15 @@ public:
   tf2::Transform map_odom_;   // cached map->odom
   bool cached_{false};
 
-  // live odom->base from the /odom topic (updated by subscription)
+  // live odom->base: TWO sources, freshest by header stamp wins (on this
+  // host no single pub->sub pairing is reliable: some stall after one
+  // message depending on language and establishment order)
   tf2::Transform odom_base_;
   bool odom_received_{false};
+  rclcpp::Time odom_stamp_{0, 0, RCL_ROS_TIME};
+  tf2::Transform odom_base2_;
+  bool odom2_received_{false};
+  rclcpp::Time odom2_stamp_{0, 0, RCL_ROS_TIME};
 
   // latest AMCL map-frame pose from the /amcl_pose topic
   tf2::Transform map_base_amcl_;
@@ -53,6 +59,7 @@ public:
   // return value is destroyed immediately (node holds only weak refs) and
   // the callbacks never fire
   rclcpp::SubscriptionBase::SharedPtr odom_sub_;
+  rclcpp::SubscriptionBase::SharedPtr odom2_sub_;
   rclcpp::SubscriptionBase::SharedPtr amcl_sub_;
 };
 
