@@ -20,6 +20,10 @@ find_package(ament_index_cpp REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(pluginlib REQUIRED)
 
 install(DIRECTORY launch config behavior_tree_xml
     DESTINATION share/${PROJECT_NAME})
@@ -31,6 +35,14 @@ install(PROGRAMS scripts/waypoint_patrol.py scripts/bringup_m6.sh scripts/tuck_a
 set(BT_DEPENDENCIES
   rclcpp rclcpp_action behaviortree_cpp_v3 action_msgs geometry_msgs
   nav2_msgs ament_index_cpp tf2 tf2_ros tf2_geometry_msgs)
+
+# ---- M7: simplified Stanley controller plugin ----
+add_library(wr_stanley_controller SHARED src/StanleyController.cpp)
+ament_target_dependencies(wr_stanley_controller
+  rclcpp rclcpp_lifecycle geometry_msgs nav_msgs nav2_core nav2_costmap_2d
+  nav2_util pluginlib tf2 tf2_ros tf2_geometry_msgs)
+target_include_directories(wr_stanley_controller PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
 add_library(wr_get_dock_pose_bt_node SHARED src/GetDockPose.cpp)
 add_library(wr_move_to_pose_bt_node SHARED src/MoveToPose.cpp)
@@ -73,6 +85,13 @@ target_link_libraries(parking_bt zmq)
 target_include_directories(parking_bt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
+install(TARGETS wr_stanley_controller
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib)
+
+install(FILES stanley_plugin.xml DESTINATION share/${PROJECT_NAME})
+
 install(TARGETS ${BT_PLUGINS} odom_tf_bridge_cpp odom_relay_cpp parking_bt
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -88,5 +107,7 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+pluginlib_export_plugin_description_file(nav2_core stanley_plugin.xml)
 
 ament_package()

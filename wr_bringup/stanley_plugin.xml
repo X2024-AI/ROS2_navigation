@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<library path="wr_stanley_controller">
+  <class name="wr_bringup/StanleyController"
+         type="wr_bringup::StanleyController"
+         base_class_type="nav2_core::Controller">
+    <description>
+      Simplified Stanley controller (heading + speed-normalised cross-track
+      steering law) adapted to a differential-drive base as a yaw-rate command.
+    </description>
+  </class>
+</library>
