@@ -378,26 +378,7 @@ controller_server:
     # --- M7: simplified Stanley controller ---
     FollowPathStanley:
       plugin: "wr_bringup/StanleyController"
-      desired_linear_vel: 0.4
-      max_steer_angle: 0.61
-      heading_gain: 1.0
-      cross_track_gain: 1.0
-      softening: 1.0
-      steer_to_omega_gain: 3.0
-      max_angular_vel: 1.0
-      front_axle_offset: 0.2
-      rotate_to_heading_threshold: 0.9
-      rotate_to_heading_gain: 1.5
-      slowdown_distance: 0.6
-      min_approach_velocity: 0.05
-      curve_slowdown_gain: 1.0
-      transform_tolerance: 0.1
-
-local_costmap:
-      # --- M7: simplified Stanley controller ---
-    FollowPathStanley:
-      plugin: "wr_bringup/StanleyController"
-      desired_linear_vel: 0.4
+      desired_linear_vel: 0.5
       max_steer_angle: 0.61
       heading_gain: 1.0
       cross_track_gain: 1.0

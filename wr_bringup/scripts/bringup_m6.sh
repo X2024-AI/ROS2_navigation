@@ -90,6 +90,16 @@ pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
 pkill -f "ros2-daemon" 2>/dev/null
 sleep 3
+# SIGKILL escalation for ghosts that ignored SIGTERM, then verify clean
+pkill -9 -f "parking_[b]t"               2>/dev/null
+pkill -9 -f "tiago_navigation[.]launch"  2>/dev/null
+pkill -9 -f "warehouse_sim[.]launch"     2>/dev/null
+pkill -9 -f "nav2_[a-z]"                 2>/dev/null
+pkill -9 -f "gzserver" 2>/dev/null
+pkill -9 -f "gzclient" 2>/dev/null
+sleep 1
+pgrep -f "nav2_[a-z]|gzserver|gzclient|parking_[b]t" >/dev/null 2>&1 && \
+  echo "   WARN: processes survived SIGKILL (D-state?) - continuing, DDS reset is the backstop"
 # userspace middleware reboot (what an OS reboot would clear):
 rm -rf /dev/shm/fastrtps_* 2>/dev/null
 find /dev/shm -maxdepth 1 -name 'sem.????????????????????????????????' -delete 2>/dev/null
