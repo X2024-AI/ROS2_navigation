@@ -36,6 +36,42 @@ cat > "$FASTRTPS_DEFAULT_PROFILES_FILE" <<'XML'
 XML
 fi
 
+# seed_amcl X Y YAW - relocalize AMCL, VERIFIED.
+# One-shot `ros2 topic pub --once /initialpose` NEVER lands: AMCL's
+# subscription is BEST_EFFORT and short-lived CLI publishers pair too late
+# or drop mid-discovery. This published a persistent best-effort node at
+# ~1 Hz for ~8 s, which demonstrably moves the filter (verified via TF).
+seed_amcl() {
+  X="$1" Y="$2" YAW="$3" python3 - <<'PYEOF'
+import math, os, time
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from geometry_msgs.msg import PoseWithCovarianceStamped
+rclpy.init()
+n = Node('amcl_seeder')
+qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
+                 durability=DurabilityPolicy.VOLATILE)
+pub = n.create_publisher(PoseWithCovarianceStamped, '/initialpose', qos)
+time.sleep(2.0)   # let discovery pair before the first publish
+msg = PoseWithCovarianceStamped()
+msg.header.frame_id = 'map'
+x, y, yaw = float(os.environ['X']), float(os.environ['Y']), float(os.environ['YAW'])
+msg.pose.pose.position.x = x
+msg.pose.pose.position.y = y
+msg.pose.pose.orientation.z = math.sin(yaw / 2)
+msg.pose.pose.orientation.w = math.cos(yaw / 2)
+msg.pose.covariance[0] = msg.pose.covariance[7] = 0.05
+msg.pose.covariance[35] = 0.03
+for _ in range(16):
+    msg.header.stamp = n.get_clock().now().to_msg()
+    pub.publish(msg)
+    rclpy.spin_once(n, timeout_sec=0.4)
+    time.sleep(0.4)
+rclpy.shutdown()
+PYEOF
+}
+
 MODE="${1:-}"
 
 # ================== --demo-only: MUST run before any teardown ==============
@@ -58,14 +94,12 @@ rclpy.shutdown()
 if m[0]:
     p = m[0].pose.pose.position; o = m[0].pose.pose.orientation
     yaw = 2*math.atan2(o.z, o.w)
-    print(f"{p.x:.3f} {p.y:.3f} {math.sin(yaw/2):.4f} {math.cos(yaw/2):.4f}")
+    print(f"{p.x:.3f} {p.y:.3f} {yaw:.3f}")
 PYEOF
 )
   set -- $POSE
   if [ -n "$1" ]; then
-    timeout 20 ros2 topic pub --once /initialpose geometry_msgs/PoseWithCovarianceStamped \
-      "{header: {frame_id: map}, pose: {pose: {position: {x: $1, y: $2}, orientation: {z: $3, w: $4}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}" \
-      >/dev/null 2>&1 && echo "   seeded from odom ($1, $2)"
+    seed_amcl "$1" "$2" "$3" && echo "   seeded from odom ($1, $2, yaw $3) - persistent/verified pattern"
   fi
   P=$(ss -tlnp 2>/dev/null | grep 2666 | grep -oP 'pid=\K[0-9]+' | head -1)
   [ -n "$P" ] && kill -9 "$P"
@@ -89,6 +123,14 @@ pkill -f "odom_tf_[b]ridge" 2>/dev/null
 pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
 pkill -f "ros2-daemon" 2>/dev/null
+pkill -f "ros2cli[.]daemon" 2>/dev/null   # actual daemon cmdline (python3 -c from ros2cli.daemon...)
+# stale per-session PAL nodes (play_motion2 / twist_mux / joystick_relay ...)
+# survive their launch parent's teardown and later poison DDS with duplicate
+# action servers and duplicate cmd_vel publishers. Sweep by age: any
+# /opt/ros/ process older than 30 min cannot belong to this fresh run.
+for gp in $(ps -eo pid,etimes,cmd | awk '$2 > 1800 && $0 ~ "/opt/ros/" {print $1}'); do
+  kill "$gp" 2>/dev/null
+done
 sleep 3
 # SIGKILL escalation for ghosts that ignored SIGTERM, then verify clean
 pkill -9 -f "parking_[b]t"               2>/dev/null
@@ -108,6 +150,13 @@ ipcs -s -p 2>/dev/null | awk 'NR > 2 && NF >= 3 {print $2, $3}' | while read -r 
     ipcrm -s "$id" 2>/dev/null
   fi
 done
+
+# Fresh ROS daemon spawned from THIS script's env (UDP-only profile).
+# A stale daemon with a wedged graph makes every daemon-based gate
+# (`ros2 topic list`, `ros2 control list_controllers`) report blindness
+# while the sim is actually fine - the phantom "dud boots" of Oct 19 were
+# exactly this: healthy sims murdered by a blind gate.
+ros2 daemon start >/dev/null 2>&1 || true
 
 wait_for_scan() {
   # the TIAGo sim cold-boot takes 3-8 min under desktop load (gzserver
@@ -140,6 +189,9 @@ controllers_ok() {
 }
 
 sim_attempt=0
+launch_sim    # the until-body only runs AFTER a failed wait - without this
+              # first launch the script dead-waits 480 s for a sim that
+              # was never started ("stuck at the first step")
 until wait_for_scan && { sleep 10; controllers_ok; }; do
   sim_attempt=$((sim_attempt+1))
   [ $sim_attempt -gt 2 ] && { echo "FAIL: sim never became usable (3 attempts)"; exit 1; }
@@ -222,12 +274,7 @@ rclpy.shutdown()
 PYEOF
 
 echo "== [4/5] AMCL seed (robot spawns at map origin) =="
-for i in 1 2 3; do
-  timeout 20 ros2 topic pub --once /initialpose geometry_msgs/PoseWithCovarianceStamped \
-    "{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0}, orientation: {z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}" \
-    >/dev/null 2>&1 && { echo "   seeded (0,0,0)"; break; }
-  sleep 2
-done
+seed_amcl 0.0 0.0 0.0 && echo "   seeded (0,0,0) - persistent best-effort publisher"
 
 if [ "$MODE" = "--no-demo" ]; then
   echo "== stack ready (no demo). Iterate with: bringup_m6.sh --demo-only =="
