@@ -39,7 +39,7 @@ public:
 private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-  MapOdomFreezer freezer_;
+  std::shared_ptr<MapOdomFreezer> freezer_;
   int good_frames_{0};
 };
 

@@ -23,7 +23,7 @@ StableDockVerify::StableDockVerify(
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, false);
   }
-  attach_odom_source(node, freezer_);
+  freezer_ = get_shared_freezer(config(), node);
 }
 
 BT::NodeStatus
@@ -41,7 +41,7 @@ StableDockVerify::tick()
   getInput("hold_frames", hold_frames);
 
   tf2::Transform map_base;
-  if (!compose_map_base(config(), *tf_buffer_, freezer_, map_base)) {
+  if (!compose_map_base(config(), *tf_buffer_, *freezer_, map_base)) {
     good_frames_ = 0;
     return BT::NodeStatus::FAILURE;
   }

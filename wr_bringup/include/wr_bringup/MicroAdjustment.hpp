@@ -13,6 +13,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "wr_bringup/CheckPoseTolerance.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
 namespace wr_bringup
@@ -92,9 +93,12 @@ private:
   // checks near the dock): publish on the twist-mux keyboard input and
   // close the loop on our own odometry sample
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
-  rclcpp::SubscriptionBase::SharedPtr spin_odom_sub_;
+  // odometry via the tree-wide self-healing shared freezer
+  std::shared_ptr<MapOdomFreezer> hub_;
   double spin_start_yaw_{0.0};
-  double spin_yaw_{0.0};
+  bool started_{false};   // one correction plan per activation
+
+  double hub_yaw() const;
   bool spin_active_{false};
 
   rclcpp::Time step_t0_;

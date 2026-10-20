@@ -222,11 +222,12 @@ tf_ok() {
 }
 if ! odom_ok; then
   if wheel_odom_ok; then
-    echo "   wheel odom alive -> topic relay to /odom (M5 topology)"
-    nohup ros2 run topic_tools relay /mobile_base_controller/odom /odom > /tmp/odom_relay.log 2>&1 &
+    echo "   wheel odom alive -> C++ relay to /odom (M5 topology)"
+    nohup ros2 run wr_bringup odom_relay_cpp > /tmp/odom_relay.log 2>&1 &
   else
     echo "   wheel odom dead -> ground-truth relay fallback"
-    nohup ros2 run wr_bringup odom_relay_cpp > /tmp/odom_relay.log 2>&1 &
+    nohup ros2 run wr_bringup odom_relay_cpp --ros-args -p source:=/ground_truth_odom \
+      > /tmp/odom_relay.log 2>&1 &
   fi
 fi
 for i in $(seq 1 15); do

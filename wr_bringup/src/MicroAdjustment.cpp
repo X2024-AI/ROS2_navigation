@@ -24,16 +24,16 @@ MicroAdjustment::MicroAdjustment(
     node, "spin");
 
   vel_pub_ = node->create_publisher<geometry_msgs::msg::Twist>("/key_vel", 10);
-  auto yaw_cb =
-    [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-      // ALWAYS update: the spin start reference must be the fresh pose,
-      // not a value gated on spin_active_ (which once left it stale and
-      // completed a step instantly with 6x overshoot)
-      const auto & o = msg->pose.pose.orientation;
-      spin_yaw_ = 2.0 * std::atan2(o.z, o.w);
-    };
-  spin_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    "/odom", rclcpp::QoS(10), yaw_cb);
+  // odometry via the tree-wide self-healing hub (a private subscription
+  // proved it can stall silently while another on the same node streams)
+  hub_ = get_shared_freezer(config(), node);
+}
+
+double
+MicroAdjustment::hub_yaw() const
+{
+  const auto & q = hub_->odom_base_.getRotation();
+  return 2.0 * std::atan2(q.z(), q.w());
 }
 
 void
@@ -99,7 +99,9 @@ MicroAdjustment::start_step()
     // RCL_ROS_TIME; an unassigned (system-time) member would throw on the
     // timeout subtraction every tick
     spin_active_ = true;
-    spin_start_yaw_ = spin_yaw_;
+    // ALWAYS the fresh pose, not a value gated on spin_active_
+    // (a stale start reference once completed a step instantly, 6x overshoot)
+    spin_start_yaw_ = hub_yaw();
     phase_ = Phase::AWAIT_RESULT;   // poll_step handles completion below
     return BT::NodeStatus::RUNNING;
   } else if (current_.type == Step::Type::DRIVE) {
@@ -131,7 +133,7 @@ MicroAdjustment::poll_step()
 
   // direct-rotation steps: close the loop on our own odometry
   if (current_.type == Step::Type::SPIN && spin_active_) {
-    double delta = spin_yaw_ - spin_start_yaw_;
+    double delta = hub_yaw() - spin_start_yaw_;
     delta = std::atan2(std::sin(delta), std::cos(delta));
     if (std::fabs(delta) >= std::fabs(current_.value) - 0.004 ||
       (node->now() - step_t0_).seconds() > 20.0)
@@ -263,6 +265,7 @@ void
 MicroAdjustment::halt()
 {
   plan_.clear();
+  started_ = false;
   phase_ = Phase::IDLE;
   spin_handle_ = nullptr;
   drive_handle_ = nullptr;
@@ -272,13 +275,20 @@ MicroAdjustment::halt()
 BT::NodeStatus
 MicroAdjustment::tick()
 {
-  if (plan_.empty() && phase_ == Phase::IDLE) {
+  if (!started_) {
+    // fresh activation: execute ONE correction plan built from the CURRENT
+    // input ports. When the plan drains we return SUCCESS so the parent
+    // Fallback re-ticks CheckPoseTolerance/CalcPoseError for a FRESH
+    // measurement - rebuilding from the ports here would loop forever on a
+    // one-shot stale error (the 2026-10-20 limit cycle: "yaw err +0.20"
+    // repeating with spins executing but the error never re-measured).
+    started_ = true;
     build_plan();
     if (plan_.empty()) {return BT::NodeStatus::SUCCESS;}   // nothing to correct
   }
 
   if (phase_ == Phase::IDLE) {
-    if (plan_.empty()) {return BT::NodeStatus::SUCCESS;}   // all steps done
+    if (plan_.empty()) {return BT::NodeStatus::SUCCESS;}   // all steps done -> re-measure
     current_ = plan_.front();
     plan_.pop_front();
     return start_step();

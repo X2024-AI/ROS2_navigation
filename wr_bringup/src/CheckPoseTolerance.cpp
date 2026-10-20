@@ -31,19 +31,29 @@ DockFrameError compute_dock_frame_error(
   return e;
 }
 
+namespace
+{
+// (re)create the primary /odom reader - pulled out so the watchdog can
+// replace a stalled one with a fresh pairing
+void make_odom_sub(const rclcpp::Node::SharedPtr & node, MapOdomFreezer & f)
+{
+  f.odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+    "/odom", rclcpp::QoS(10),
+    [&f](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+      tf2::Transform ob;
+      tf2::fromMsg(msg->pose.pose, ob);
+      f.odom_base_ = ob;
+      f.odom_received_ = true;
+      f.odom_stamp_ = rclcpp::Time(msg->header.stamp);
+    });
+}
+}  // namespace
+
 void attach_odom_source(
   const rclcpp::Node::SharedPtr & node,
   MapOdomFreezer & freezer)
 {
-  freezer.odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    "/odom", rclcpp::QoS(10),
-    [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-      tf2::Transform ob;
-      tf2::fromMsg(msg->pose.pose, ob);
-      freezer.odom_base_ = ob;
-      freezer.odom_received_ = true;
-      freezer.odom_stamp_ = rclcpp::Time(msg->header.stamp);
-    });
+  make_odom_sub(node, freezer);
   freezer.odom2_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
     "/ground_truth_odom", rclcpp::QoS(10),
     [&freezer](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
@@ -61,6 +71,46 @@ void attach_odom_source(
       freezer.map_base_amcl_ = mb;
       freezer.amcl_received_ = true;
     });
+
+  // self-healing watchdog: wheel odometry streams continuously (even at
+  // standstill), so a stamp that stops advancing means THIS reader stalled -
+  // recreate it (fresh pairing) instead of measuring against a frozen pose
+  freezer.node_weak_ = node;
+  freezer.last_change_wall_ = std::chrono::steady_clock::now();
+  freezer.heal_timer_ = node->create_wall_timer(
+    std::chrono::milliseconds(500),
+    [&freezer]() {
+      if (freezer.odom_stamp_ != freezer.prev_stamp_) {
+        freezer.prev_stamp_ = freezer.odom_stamp_;
+        freezer.last_change_wall_ = std::chrono::steady_clock::now();
+        return;
+      }
+      if (std::chrono::steady_clock::now() - freezer.last_change_wall_ >
+        std::chrono::milliseconds(1500))
+      {
+        auto n = freezer.node_weak_.lock();
+        if (n) {
+          RCLCPP_WARN(
+            n->get_logger(),
+            "odom hub: /odom stamp silent >1.5 s - recreating subscription");
+          make_odom_sub(n, freezer);
+          freezer.last_change_wall_ = std::chrono::steady_clock::now();
+        }
+      }
+    });
+}
+
+std::shared_ptr<MapOdomFreezer> get_shared_freezer(
+  const BT::NodeConfiguration & config,
+  const rclcpp::Node::SharedPtr & node)
+{
+  std::shared_ptr<MapOdomFreezer> shared;
+  config.blackboard->get("shared_freezer", shared);
+  if (!shared) {
+    shared = std::make_shared<MapOdomFreezer>();
+    attach_odom_source(node, *shared);
+  }
+  return shared;
 }
 
 bool compose_map_base(
@@ -81,14 +131,16 @@ bool compose_map_base(
         auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
         tf2::Transform map_odom;
         tf2::fromMsg(m.transform, map_odom);
-        // synthesize the AMCL-side sample from the current odom pose
-        if (freezer.odom2_received_ &&
-          (!freezer.odom_received_ || freezer.odom2_stamp_ > freezer.odom_stamp_))
-        {
-          freezer.map_base_amcl_ = map_odom * freezer.odom_base2_;
-          freezer.amcl_received_ = true;
-        } else if (freezer.odom_received_) {
+        // synthesize the AMCL-side sample from the current odom pose.
+        // /odom is the PRIMARY source; the GT topic is a transport-failure
+        // fallback ONLY: under single-source wheel odometry the two topics
+        // carry DIFFERENT frames, and "fresher stamp wins" would mix frames
+        // and freeze the error at a constant offset (limit cycle, 2026-10-20).
+        if (freezer.odom_received_) {
           freezer.map_base_amcl_ = map_odom * freezer.odom_base_;
+          freezer.amcl_received_ = true;
+        } else if (freezer.odom2_received_) {
+          freezer.map_base_amcl_ = map_odom * freezer.odom_base2_;
           freezer.amcl_received_ = true;
         }
       } catch (const tf2::TransformException &) {
@@ -108,12 +160,30 @@ bool compose_map_base(
   if (!freezer.odom_received_ && !freezer.odom2_received_) {
     return false;   // no odometry sample yet
   }
-  // freshest source wins
+  // /odom primary, GT topic strictly a fallback (never "fresher wins":
+  // under wheel odometry the GT topic is a DIFFERENT frame - composing it
+  // with the wheel-frame cached map->odom yields a constant wrong error
+  // and a micro-adjustment limit cycle)
   const tf2::Transform & ob =
-    (freezer.odom2_received_ &&
-    (!freezer.odom_received_ || freezer.odom2_stamp_ > freezer.odom_stamp_))
-    ? freezer.odom_base2_ : freezer.odom_base_;
+    freezer.odom_received_ ? freezer.odom_base_ : freezer.odom_base2_;
   map_base_out = freezer.map_odom_ * ob;
+  {  // diagnostics: attribute a frozen error to its source
+    auto n = config.blackboard->get<rclcpp::Node::SharedPtr>("node");
+    auto yaw_of = [](const tf2::Transform & t) {
+        return std::atan2(2.0 * (t.getRotation().w() * t.getRotation().z()),
+          1.0 - 2.0 * t.getRotation().z() * t.getRotation().z());
+      };
+    double age1 = freezer.odom_received_
+      ? (n->get_clock()->now() - freezer.odom_stamp_).seconds() : -1.0;
+    double age2 = freezer.odom2_received_
+      ? (n->get_clock()->now() - freezer.odom2_stamp_).seconds() : -1.0;
+    RCLCPP_INFO(
+      n->get_logger(),
+      "compose diag: frozen=%d cached=%d odom_age=%.2f odom2_age=%.2f amcl=%d "
+      "map_odom_yaw=%+.3f ob_yaw=%+.3f result_yaw=%+.3f",
+      frozen, freezer.cached_, age1, age2, freezer.amcl_received_,
+      yaw_of(freezer.map_odom_), yaw_of(ob), yaw_of(map_base_out));
+  }
   return true;
 }
 
@@ -133,7 +203,7 @@ CheckPoseTolerance::CheckPoseTolerance(
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, false);
   }
-  attach_odom_source(node, freezer_);
+  freezer_ = get_shared_freezer(config(), node);
 }
 
 BT::NodeStatus
@@ -149,7 +219,7 @@ CheckPoseTolerance::tick()
   getInput("yaw_tol", yaw_tol);
 
   tf2::Transform map_base;
-  if (!compose_map_base(config(), *tf_buffer_, freezer_, map_base)) {
+  if (!compose_map_base(config(), *tf_buffer_, *freezer_, map_base)) {
     RCLCPP_WARN(node->get_logger(), "tolerance check: TF unavailable");
     return BT::NodeStatus::FAILURE;
   }

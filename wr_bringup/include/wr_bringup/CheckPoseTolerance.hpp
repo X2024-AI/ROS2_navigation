@@ -1,6 +1,7 @@
 #ifndef WR_BRINGUP__CHECKPOSETOLERANCE_HPP_
 #define WR_BRINGUP__CHECKPOSETOLERANCE_HPP_
 
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -61,7 +62,29 @@ public:
   rclcpp::SubscriptionBase::SharedPtr odom_sub_;
   rclcpp::SubscriptionBase::SharedPtr odom2_sub_;
   rclcpp::SubscriptionBase::SharedPtr amcl_sub_;
+
+  // ---- self-healing /odom hub ----
+  // This host nondeterministically stalls individual DDS readers (proven
+  // 2026-10-20: two /odom subscriptions on the SAME node - MicroAdjustment's
+  // streamed while the freezer's froze on its first message, wedging the
+  // micro-loop at a constant error). All M6 nodes therefore share ONE
+  // freezer ("shared_freezer" on the blackboard, created by parking_bt_main)
+  // whose /odom subscription a watchdog RECREATES whenever its stamp stops
+  // advancing: wheel odometry streams continuously even at standstill, so
+  // stamp silence means a stalled reader, not a still robot.
+  std::weak_ptr<rclcpp::Node> node_weak_;
+  rclcpp::TimerBase::SharedPtr heal_timer_;
+  rclcpp::Time prev_stamp_{0, 0, RCL_ROS_TIME};
+  std::chrono::steady_clock::time_point last_change_wall_{
+    std::chrono::steady_clock::now()};
 };
+
+// Fetch the tree-wide shared freezer from the blackboard entry
+// "shared_freezer" (set by parking_bt_main); create + attach a standalone
+// one when absent so every node still works in isolation.
+std::shared_ptr<MapOdomFreezer> get_shared_freezer(
+  const BT::NodeConfiguration & config,
+  const rclcpp::Node::SharedPtr & node);
 
 // Build the current map->base transform for a node: frozen map->odom
 // composed with the topic-sourced live odometry pose.
@@ -98,7 +121,7 @@ public:
 private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-  MapOdomFreezer freezer_;
+  std::shared_ptr<MapOdomFreezer> freezer_;
 };
 
 }  // namespace wr_bringup

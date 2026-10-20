@@ -13,6 +13,8 @@
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
 
+#include "wr_bringup/CheckPoseTolerance.hpp"
+
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/buffer.h"
@@ -57,6 +59,14 @@ int main(int argc, char * argv[])
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   auto tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer, node, false);
   blackboard->set("tf_buffer", tf_buffer);
+
+  // One tree-wide odometry hub with a SELF-HEALING /odom subscription:
+  // individual readers on this host can stall silently while another
+  // subscription to the same topic on the same node keeps streaming
+  // (proven 2026-10-20) - all measuring nodes read this shared instance.
+  auto shared_freezer = std::make_shared<wr_bringup::MapOdomFreezer>();
+  wr_bringup::attach_odom_source(node, *shared_freezer);
+  blackboard->set("shared_freezer", shared_freezer);
 
   BT::Tree tree = factory.createTreeFromFile(xml_file, blackboard);
 
