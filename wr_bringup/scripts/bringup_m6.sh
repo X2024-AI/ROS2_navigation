@@ -204,16 +204,30 @@ until wait_for_scan && { sleep 10; controllers_ok; }; do
 done
 echo "   sim usable (laser + controllers)"
 
-echo "== [2/5] odometry gate =="
+echo "== [2/5] odometry gate (SINGLE SOURCE) =="
+# Dual odom->base TF publishers (native wheel + GT bridge) are FATAL once
+# the two disagree (wheel slip after collisions): AMCL receives metre-scale
+# teleports every few messages and scrambles - the root cause behind every
+# "mystery" patrol failure since M6 (proven 2026-10-20: dual stream
+# alternating +0.34/-1.92 at 120 Hz -> 1/6; wheel-only -> 6/6 in 234 s).
+# M5's topology was wheel-only; the GT bridge now starts ONLY as fallback.
 odom_ok() {
   timeout 5 ros2 topic info /odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
+}
+wheel_odom_ok() {
+  timeout 5 ros2 topic info /mobile_base_controller/odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
 }
 tf_ok() {
   timeout 4 ros2 run tf2_ros tf2_echo odom base_footprint 2>/dev/null | grep -q "Translation"
 }
 if ! odom_ok; then
-  echo "   /odom has no publisher -> starting relay"
-  nohup ros2 run wr_bringup odom_relay_cpp > /tmp/odom_relay.log 2>&1 &
+  if wheel_odom_ok; then
+    echo "   wheel odom alive -> topic relay to /odom (M5 topology)"
+    nohup ros2 run topic_tools relay /mobile_base_controller/odom /odom > /tmp/odom_relay.log 2>&1 &
+  else
+    echo "   wheel odom dead -> ground-truth relay fallback"
+    nohup ros2 run wr_bringup odom_relay_cpp > /tmp/odom_relay.log 2>&1 &
+  fi
 fi
 for i in $(seq 1 15); do
   odom_ok && { echo "   /odom OK"; break; }
@@ -221,13 +235,18 @@ for i in $(seq 1 15); do
 done
 odom_ok || { echo "FAIL: /odom never published"; exit 1; }
 
-# The bridge runs UNCONDITIONALLY: the sim's native odom->base TF output
-# has been observed dying MID-SESSION. Alongside healthy native TF it is
-# harmless (same values); when native dies, it keeps the robot alive.
-echo "   starting odom->base TF bridge"
-nohup ros2 run wr_bringup odom_tf_bridge_cpp > /tmp/odom_tf_bridge.log 2>&1 &
-sleep 3
-tf_ok && echo "   odom->base TF OK" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
+# odom->base TF: use the NATIVE (wheel) TF when present; the GT bridge is
+# a fallback only, never a second concurrent source.
+tf_waited=0
+while ! tf_ok && [ $tf_waited -lt 10 ]; do sleep 2; tf_waited=$((tf_waited+2)); done
+if tf_ok; then
+  echo "   native odom->base TF present - GT bridge NOT started (single source)"
+else
+  echo "   native odom->base TF missing -> starting GT bridge fallback"
+  nohup ros2 run wr_bringup odom_tf_bridge_cpp > /tmp/odom_tf_bridge.log 2>&1 &
+  sleep 3
+  tf_ok && echo "   odom->base TF OK (bridge)" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
+fi
 
 echo "== [3/5] Nav2 (be patient: up to 3 min under boot contention) =="
 cd "$WS" && nohup ros2 launch br2_navigation tiago_navigation.launch.py \
