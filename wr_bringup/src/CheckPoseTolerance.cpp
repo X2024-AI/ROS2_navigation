@@ -167,22 +167,32 @@ bool compose_map_base(
   const tf2::Transform & ob =
     freezer.odom_received_ ? freezer.odom_base_ : freezer.odom_base2_;
   map_base_out = freezer.map_odom_ * ob;
-  {  // diagnostics: attribute a frozen error to its source
-    auto n = config.blackboard->get<rclcpp::Node::SharedPtr>("node");
+  {  // diagnostics (throttled: on yaw change or every 2 s): attribute a
+    // frozen measurement to its source. Stamps are SIM time, printed raw -
+    // the node clock is wall time, so subtracting them is meaningless.
+    static double last_printed_yaw = 999.0;
+    static std::chrono::steady_clock::time_point last_print =
+      std::chrono::steady_clock::now() - std::chrono::seconds(10);
     auto yaw_of = [](const tf2::Transform & t) {
         return std::atan2(2.0 * (t.getRotation().w() * t.getRotation().z()),
           1.0 - 2.0 * t.getRotation().z() * t.getRotation().z());
       };
-    double age1 = freezer.odom_received_
-      ? (n->get_clock()->now() - freezer.odom_stamp_).seconds() : -1.0;
-    double age2 = freezer.odom2_received_
-      ? (n->get_clock()->now() - freezer.odom2_stamp_).seconds() : -1.0;
-    RCLCPP_INFO(
-      n->get_logger(),
-      "compose diag: frozen=%d cached=%d odom_age=%.2f odom2_age=%.2f amcl=%d "
-      "map_odom_yaw=%+.3f ob_yaw=%+.3f result_yaw=%+.3f",
-      frozen, freezer.cached_, age1, age2, freezer.amcl_received_,
-      yaw_of(freezer.map_odom_), yaw_of(ob), yaw_of(map_base_out));
+    const double ry = yaw_of(map_base_out);
+    const bool due = std::fabs(ry - last_printed_yaw) > 0.01 ||
+      std::chrono::steady_clock::now() - last_print > std::chrono::seconds(2);
+    if (due) {
+      last_printed_yaw = ry;
+      last_print = std::chrono::steady_clock::now();
+      auto n = config.blackboard->get<rclcpp::Node::SharedPtr>("node");
+      RCLCPP_INFO(
+        n->get_logger(),
+        "compose diag: frozen=%d cached=%d odom_stamp=%.1f amcl=%d "
+        "map_odom_yaw=%+.3f ob_yaw=%+.3f result_yaw=%+.3f",
+        frozen, freezer.cached_,
+        freezer.odom_received_ ? freezer.odom_stamp_.seconds() : -1.0,
+        freezer.amcl_received_,
+        yaw_of(freezer.map_odom_), yaw_of(ob), ry);
+    }
   }
   return true;
 }

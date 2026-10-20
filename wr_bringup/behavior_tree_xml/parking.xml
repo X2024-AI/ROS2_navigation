@@ -27,6 +27,10 @@
                                  correction="{corr}" magnitude="{corr_mag}"/>
                   <MicroAdjustment correction="{corr}" magnitude="{corr_mag}"
                                    pos_tol="0.02" yaw_tol="0.00873" speed="0.05"/>
+                  <!-- a completed correction is NOT loop success: fail so the
+                       RetryUntilSuccessful re-ticks CheckPoseTolerance for a
+                       fresh measurement; only the check passing satisfies it -->
+                  <AlwaysFailure/>
                 </Sequence>
               </Fallback>
             </RetryUntilSuccessful>
