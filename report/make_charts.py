@@ -17,6 +17,7 @@ SURFACE = '#fcfcfb'
 INK, INK2, MUTED = '#0b0b0b', '#52514e', '#898781'
 GRID, BASE = '#e1e0d9', '#c3c2b7'
 C_DWB, C_RPP, C_MPPI = '#2a78d6', '#eb6834', '#1baf7a'  # slots 1..3
+C_STANLEY = '#8265c9'                                    # slot 4 (M7, ours)
 C_DWB_EMPH = '#1c5cab'                                   # blue step 550 (adopted)
 
 for f in font_manager.fontManager.ttflist:
@@ -63,13 +64,14 @@ runs = {}
 for f in RESULTS:
     runs[f.split('/')[-1]] = parse(f)
 
-# ---------------- chart A: controller totals (M5) ----------------
+# ---------------- chart A: controller totals (M5 + M7) ----------------
 A = [  # label, seconds, score, color
     ('DWB\n(M4 调优后)', runs['patrol_exp5_simtime10.log'][0], '6/6', C_DWB),
     ('RPP\n(默认参数)', runs['patrol_m5_rpp.log'][0], '5/6', C_RPP),
     ('MPPI\n(wz_max=1.0)', runs['patrol_m5_mppi_tuned.log'][0], '6/6', C_MPPI),
+    ('Stanley\n(自研插件)', runs['patrol_m7_stanley2.log'][0], '6/6', C_STANLEY),
 ]
-fig, ax = plt.subplots(figsize=(5.4, 3.0), dpi=200)
+fig, ax = plt.subplots(figsize=(5.8, 3.0), dpi=200)
 xs = range(len(A))
 ax.bar(xs, [a[1] for a in A], width=0.55, color=[a[3] for a in A], zorder=3)
 for x, (name, sec, score, _) in zip(xs, A):
@@ -79,7 +81,7 @@ for x, (name, sec, score, _) in zip(xs, A):
 ax.set_xticks(list(xs))
 ax.set_xticklabels([a[0] for a in A], fontsize=9.5)
 ax.set_ylabel('巡检总耗时 (s)', fontsize=9.5)
-ax.set_title('三种控制器:同一路线巡检总耗时与到达率', fontsize=11, color=INK, pad=10)
+ax.set_title('四种控制器:同一路线巡检总耗时与到达率', fontsize=11, color=INK, pad=10)
 ax.set_ylim(0, 640)
 ax.grid(axis='x', visible=False)
 fig.tight_layout()
@@ -115,24 +117,25 @@ fig.tight_layout()
 fig.savefig('figs/chart_tuning.pdf')
 fig.savefig('figs/chart_tuning.png')
 
-# ---------------- chart C: per-leg times (M5) ----------------
+# ---------------- chart C: per-leg times (M5 + M7) ----------------
 legs_dwb = runs['patrol_exp5_simtime10.log'][2]
 _legs_rpp_raw = runs['patrol_m5_rpp.log'][2]
 legs_mppi = runs['patrol_m5_mppi_tuned.log'][2]
+legs_stanley = runs['patrol_m7_stanley2.log'][2]
 # RPP log file is contaminated (an interleaved dead first attempt), so per-leg
 # times are anchored on the live-monitored REACHED stamps and the run total:
 # start=1791812191 (=end 727 − total 536); REACHED: 227,270,410,480,512.
 legs_rpp = [36, 43, 140, 70, 32]  # wp1..wp5; wp6 未到达 (215 s dither, then abort)
 print('RPP raw legs (parse artifact check):', _legs_rpp_raw)
-print('DWB legs:', legs_dwb, '| MPPI legs:', legs_mppi)
+print('DWB legs:', legs_dwb, '| MPPI legs:', legs_mppi, '| Stanley legs:', legs_stanley)
 
-fig, ax = plt.subplots(figsize=(6.4, 3.0), dpi=200)
-n, w, gap = 3, 0.24, 0.03
-xs = [i * (3 * w + 2 * gap) for i in range(6)]
+fig, ax = plt.subplots(figsize=(6.8, 3.0), dpi=200)
+n, w, gap = 4, 0.18, 0.025
+xs = [i * (n * w + (n - 1) * gap) for i in range(6)]
 
 
 def group(i, vals, color, label):
-    off = (i - 1) * (w + gap)
+    off = (i - (n - 1) / 2) * (w + gap)
     xs_ = [x + off for x in xs[:len(vals)]]
     ax.bar(xs_, vals, width=w, color=color, label=label, zorder=3)
 
@@ -140,6 +143,7 @@ def group(i, vals, color, label):
 group(0, legs_dwb, C_DWB, 'DWB')
 group(1, legs_rpp, C_RPP, 'RPP')
 group(2, legs_mppi, C_MPPI, 'MPPI')
+group(3, legs_stanley, C_STANLEY, 'Stanley(自研)')
 # RPP wp6: no bar — mark the miss
 x6 = xs[5] + (w + gap)
 ax.text(x6, 6, '× 未到达', ha='center', va='bottom', fontsize=8.5, color=C_RPP)

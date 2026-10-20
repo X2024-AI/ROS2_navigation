@@ -39,7 +39,8 @@
 使用 slam\_toolbox 构建 306$\times$354 像素(15.3\,m$\times$17.7\,m,分辨率 0.05\,m/像素)的仓库栅格地图;
 基于 Nav2 实现自主定位(AMCL)与导航,并以 nav2\_simple\_commander 编写六航点顺序巡检程序;
 通过控制变量法完成 Nav2 关键参数调优,巡检总耗时由 829\,s 降至 236\,s($-71\%$),到达率由 5/6 提升至 6/6;
-最后在同一基准路线上对比 DWB、RPP、MPPI 三种局部控制器,MPPI 以 188\,s(6/6)取得最优结果。
+最后在同一基准路线上对比 DWB、RPP、MPPI 三种局部控制器,并以 \texttt{nav2\_core::Controller} 插件形式实现简化 Stanley 控制器纳入同一基准:
+MPPI 以 188\,s(6/6)最优,自研 Stanley 以 242\,s(6/6)次之。
 报告同时记录了调试过程中发现的若干工程问题(二维激光对悬空障碍物不可见、参数文件静默加载失败、
 生命周期节点无管理器、控制器角速度上限击穿 AMCL 定位等)及其定位方法与解决方案。
 \end{abstract}
@@ -70,7 +71,7 @@ ROS 版本 & ROS 2 Humble \\
 \subsection{方案与里程碑}
 作业按 9 个里程碑推进:仿真环境搭建(M1)→ SLAM 建图(M2)→ Nav2 多目标导航(M3)→
 参数调优(M4)→ 控制器对比(M5)→ 行为树精确泊车(M6)→ 自定义控制器插件(M7)→ 报告与打包(M8)。
-截至本报告撰写时,M1--M5 已完成,主要交付物集中在 \texttt{wr\_bringup} 功能包中
+截至本报告撰写时,M1--M5 与 M7 已完成,主要交付物集中在 \texttt{wr\_bringup} 功能包中
 (结构见附录~\ref{app:files})。
 
 \section{仿真环境构建}
@@ -245,9 +246,11 @@ RPP & 官方默认参数 & 5/6 & 536 \\
 RPP & approach\_vel=0.15 & 4/6 & 831 \\
 MPPI & $w_{z,max}$=1.9(默认) & 0/6 & --- \\
 MPPI & $w_{z,max}$=1.0, batch=1000 & \textbf{6/6} & \textbf{188} \\
+MPPI & 同配置,2026-10-20 复测 & 6/6 & 234 \\
+Stanley & 自研插件(第~\ref{sec:stanley} 节) & 6/6 & 242 \\
 \bottomrule
 \end{tabular}
-\caption{三种控制器对比(基准:六航点巡检)}
+\caption{控制器对比(基准:六航点巡检;Stanley 为 M7 自研插件)}
 \label{tab:controllers}
 \end{table}
 
@@ -261,7 +264,7 @@ MPPI & $w_{z,max}$=1.0, batch=1000 & \textbf{6/6} & \textbf{188} \\
   \centering
   \includegraphics[width=\textwidth]{chart_legs.pdf}
 \end{minipage}
-\caption{左:三控制器总耗时与到达率;右:分段耗时(RPP 6 号航点未到达)}
+\caption{左:四控制器总耗时与到达率(Stanley 为自研插件);右:分段耗时(RPP 6 号航点未到达)}
 \label{fig:controllers}
 \end{figure}
 
@@ -292,9 +295,73 @@ MPPI & $w_{z,max}$=1.0, batch=1000 & \textbf{6/6} & \textbf{188} \\
 % TODO: M6 —— 基于 br2_bt_patrolling 框架编写自定义 BT 节点实现精确泊车,
 % 启用参数文件中预留的 precise_goal_checker(xy/yaw 收紧), 附 BT XML 与实测精度。
 
-\section{自定义控制器插件(待完成)}
-% TODO: M7 —— 实现 Stanley 或 PID-PurePursuit 控制器插件(nav2_core::Controller),
-% 编译注册后纳入本节基准对比。
+\section{自定义控制器插件:简化 Stanley}\label{sec:stanley}
+
+\subsection{算法原理与差速底盘适配}
+Stanley 控制器(DARPA Grand Challenge,Hoffmann 等)以\textbf{前轴参考点}为
+控制基准,转向角由航向误差项与经速度归一化的横向误差项构成:
+\begin{equation}
+  \delta = \psi_e + \arctan\!\left(\frac{k_e \, e}{|v| + k_{soft}}\right)
+\end{equation}
+其中 $\psi_e$ 为路径切向与机器人航向的夹角,$e$ 为前轴点相对路径的
+\textbf{符号}横向误差(由路径切向的左法线判定符号),
+$k_{soft}$ 软化项避免低速时控制量发散。
+差速底盘没有转向角,本项目将 $\delta$ 经增益映射为角速度
+$\omega = k_\omega \delta$ 并限幅,并补齐原始公式不覆盖的三种工况:
+\begin{enumerate}
+  \item \textbf{大航向误差}($>\!0.9$\,rad)先原地旋至路径方向再起步跟踪;
+  \item \textbf{末端姿态整定}:路径跟踪器只保证``收敛到路径'',
+        不保证终点朝向——距路径终点 $<0.2$\,m 时切换为对终点朝向的闭环旋转
+        (扮演 DWB RotateToGoal / MPPI GoalCritic 的角色);
+  \item \textbf{减速策略}:弯道 $v = v_{des}/(1 + k_c|\delta|)$,
+        末端 0.6\,m 内线性降至 0.05\,m/s。
+\end{enumerate}
+
+\subsection{工程实现}
+插件 \texttt{wr\_bringup/StanleyController} 继承 \texttt{nav2\_core::Controller},
+实现完整的生命周期接口(configure/cleanup/activate/deactivate)与
+\texttt{setPlan}/\texttt{computeVelocityCommands}/\texttt{setSpeedLimit}。
+路径在 \texttt{setPlan} 中一次性变换到代价地图坐标系;
+\texttt{computeVelocityCommands} 内完成最近点投影(全路径扫描)、
+切向角与符号横向误差、剩余路程计算,随后输出上述控制律。
+全部增益均为 YAML 参数($v_{des}$=0.5\,m/s、$k_e$=1.0、$k_{soft}$=1.0、$k_\omega$=3.0 等),
+可运行时调优。
+
+集成环节的两个非平凡工程问题:
+\begin{enumerate}
+  \item \textbf{pluginlib 注册必须在 CMake 中显式导出}:
+        \texttt{pluginlib\_export\_plugin\_description\_file(nav2\_core stanley\_plugin.xml)}。
+        仅在 package.xml 的 \texttt{<export>} 中声明\textbf{不会注册任何东西},
+        症状是 controller\_server 启动即致命错误``class does not exist'',
+        且此前没有任何警告——静默失败使该问题一度难定位。
+  \item \textbf{多目标检查器下的 BT 兼容}:参数文件注册多个 goal\_checker 后,
+        BT 中 \texttt{<FollowPath>} 必须显式携带 \texttt{goal\_checker\_id},
+        空 ID 会导致每个导航目标被即时中止
+        (M6 加入精确泊车检查器后,M5 时代的 BT 变体即触发此问题)。
+\end{enumerate}
+
+\subsection{基准结果}
+与 M5 完全相同的六航点巡检、相同的启动协议
+(同一台架、同一地图、统一初始位姿重定位、单一变量为 BT 中的控制器 ID):
+Stanley 以 \textbf{242\,s(6/6)}完成巡检,四种控制器中位列第二——
+比 DWB 慢 6\,s,比 RPP 快 294\,s 且多到达一个航点,比 MPPI 慢 54\,s
+(完整数据见表~\ref{tab:controllers}、图~\ref{fig:controllers})。
+分段耗时轮廓 $[33,34,53,32,39,51]$\,s 与 DWB 的 $[25,39,52,39,27,53]$\,s
+高度接近——两者同为确定性几何跟踪器;
+而 MPPI 的优势集中在首段冲刺(12\,s)与末端整定,
+这是滚动优化相对几何方法的结构性差异。
+
+\subsection{公平性说明与结论}
+两个需明示的实验条件:
+(1)velocity\_smoother 以 0.26\,m/s \textbf{统一钳制}全部控制器的线速度指令
+(M5 与 M7 各行均如此),表中差异反映跟踪行为而非极速;
+(2)M7 行的起始位姿与 M5 各行不同(非同一出生点),
+作为交叉验证,同日以相同协议复测 MPPI 得 234\,s(6/6),
+与 M5 原始 188\,s 同量级,排除了环境漂移对结论的影响。
+
+结论:简化 Stanley 在\textbf{未做增益精调}的情况下即可稳定完成全流程,
+验证了该经典几何控制律适配差速底盘与仓库场景的可行性;
+其确定性、低计算量(无轨迹采样)与紧凑实现适合作为教学与调试基线。
 
 \section{总结与展望}
 本项目完成了仓库巡检机器人从建图、导航、调优到多控制器对比的完整闭环:
@@ -303,10 +370,12 @@ MPPI & $w_{z,max}$=1.0, batch=1000 & \textbf{6/6} & \textbf{188} \\
   \item 六航点顺序巡检程序,参数调优后耗时 829\,s→236\,s($-71\%$)、到达率 100\%;
   \item 三控制器同基准对比,MPPI 最优(188\,s),并揭示 RPP 末端收敛的结构性缺陷、
         MPPI 高角速度对 AMCL 定位的击穿效应等非平凡结论;
+  \item 以 nav2\_core 插件形式实现简化 Stanley 控制器,同一基准下 242\,s(6/6)
+        位列第二,验证了经典几何控制律在差速底盘上的可用性(M7);
   \item 全部实验保留可复现的日志与脚本(附录~\ref{app:files})。
 \end{itemize}
-后续工作:行为树精确泊车(M6)、自定义控制器插件(M7)、
-以 keepout 过滤器替代地图手工修补,以及在真实硬件上的迁移验证。
+后续工作:行为树精确泊车(M6)、以 keepout 过滤器替代地图手工修补,
+以及对 Stanley 增益($k_e$、$k_\omega$)的系统性精调与真实硬件上的迁移验证。
 
 \appendix
 \section{文件清单}\label{app:files}
@@ -318,10 +387,12 @@ MPPI & $w_{z,max}$=1.0, batch=1000 & \textbf{6/6} & \textbf{188} \\
 \midrule
 \texttt{launch/warehouse\_sim.launch.py} & 仓库仿真启动 \\
 \texttt{maps/warehouse.pgm/.yaml} & SLAM 地图(含桌面致命区) \\
-\texttt{config/tiago\_nav\_params.yaml} & 调优后导航参数(三控制器注册) \\
-\texttt{config/bt/nav\_bt\_\{RPP,MPPI\}.xml} & 控制器切换用 BT 变体 \\
+\texttt{config/tiago\_nav\_params.yaml} & 调优后导航参数(五控制器注册) \\
+\texttt{config/bt/nav\_bt\_\{RPP,MPPI,Stanley\}.xml} & 控制器切换用 BT 变体 \\
+\texttt{src/StanleyController.cpp} + \texttt{.hpp} & M7 自研 Stanley 控制器插件 \\
+\texttt{stanley\_plugin.xml} & pluginlib 插件描述文件 \\
 \texttt{scripts/waypoint\_patrol.py} & 六航点巡检程序 \\
-\texttt{results/patrol\_*.log} & 全部 12 次基准运行日志 \\
+\texttt{results/patrol\_*.log} & 全部基准运行日志(M4--M7) \\
 \hline
 \end{tabular}
 \caption{wr\_bringup 功能包交付物}
@@ -340,6 +411,8 @@ ros2 lifecycle set /map_server configure && ros2 lifecycle set /map_server activ
 ros2 lifecycle set /amcl configure && ros2 lifecycle set /amcl activate
 # 4. 巡检
 ros2 run wr_bringup waypoint_patrol.py
+# 5. 切换控制器:将 params 中 default_nav_to_pose_bt_xml 指向
+#    nav_bt_{RPP,MPPI,Stanley}.xml 后重启导航栈
 \end{lstlisting}
 
 \end{document}
