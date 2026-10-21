@@ -175,12 +175,11 @@ wait_for_scan() {
 }
 
 launch_sim() {
-  # HEADLESS by default: on this hybrid-NVIDIA host a live gzclient can
-  # starve gzserver's sensor rendering (laser never initializes - 5 dud
-  # boots 2026-10-21). gzclient:=false suppresses the GUI from birth (no
-  # window flash); KEEP_GUI=1 passes gzclient:=true for manual sessions.
-  local gui="False"
-  [ "${KEEP_GUI:-0}" = "1" ] && gui="True"
+  # GUI ON by default (user preference - watch the robot). On a degraded
+  # graphics session a live gzclient can starve the laser (2026-10-21):
+  # if sims go dud with the window up, reboot, or run HEADLESS=1.
+  local gui="True"
+  [ "${HEADLESS:-0}" = "1" ] && gui="False"
   cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py gzclient:=$gui > /tmp/sim_launch.log 2>&1 &
 }
 

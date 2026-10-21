@@ -38,8 +38,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'gzclient',
-            default_value='False',
-            description='Launch the Gazebo GUI (false = headless, required for reliable laser init on this host)'),
+            default_value='True',
+            description='Launch the Gazebo GUI (True = watch the robot; use HEADLESS=1 via bringup for benchmark/degraded-session runs)'),
         include_sim,
         tuck_retry,
     ])
