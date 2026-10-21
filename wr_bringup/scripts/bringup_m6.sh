@@ -175,16 +175,13 @@ wait_for_scan() {
 }
 
 launch_sim() {
-  cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
-  # HEADLESS by default: on this hybrid-NVIDIA host, gzclient's GL context
-  # contends with gzserver's sensor rendering - with the GUI alive the laser
-  # never initializes (5 dud boots on 2026-10-21); with gzclient killed at
-  # t+10s the laser AND controllers come up in ~40 s (proven live). The
-  # pipeline needs no Gazebo window (watch in RViz instead).
-  # Set KEEP_GUI=1 to keep the Gazebo window for manual sessions.
-  if [ "${KEEP_GUI:-0}" != "1" ]; then
-    ( sleep 10; pkill -f "gzclient" 2>/dev/null ) &
-  fi
+  # HEADLESS by default: on this hybrid-NVIDIA host a live gzclient can
+  # starve gzserver's sensor rendering (laser never initializes - 5 dud
+  # boots 2026-10-21). gzclient:=false suppresses the GUI from birth (no
+  # window flash); KEEP_GUI=1 passes gzclient:=true for manual sessions.
+  local gui="False"
+  [ "${KEEP_GUI:-0}" = "1" ] && gui="True"
+  cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py gzclient:=$gui > /tmp/sim_launch.log 2>&1 &
 }
 
 # Kill a running sim attempt COMPLETELY: launch parent first (so ros2 launch
