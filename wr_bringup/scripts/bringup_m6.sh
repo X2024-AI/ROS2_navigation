@@ -278,19 +278,30 @@ else
   tf_ok && echo "   odom->base TF OK (bridge)" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
 fi
 
-echo "== [3/5] Nav2 (be patient: up to 3 min under boot contention) =="
-cd "$WS" && nohup ros2 launch br2_navigation tiago_navigation.launch.py \
-  map:=$WS/src/wr_bringup/maps/warehouse.yaml \
-  params_file:=$WS/src/wr_bringup/config/tiago_nav_params.yaml > /tmp/nav_launch.log 2>&1 &
-for i in $(seq 1 90); do
-  sleep 2
-  [ "$(grep -c 'Managed nodes are active' /tmp/nav_launch.log)" -ge 2 ] && break
-done
-# The CLI lifecycle tool silently no-ops when service responses are lost
-# under load (and the lifecycle manager itself can stall waiting for the
-# planner's configure response). This direct python driver is robust.
-python3 - <<'PYEOF'
-import rclpy, time
+# (Re)start the Nav2 tree. Used at bring-up AND by the warm-up recovery
+# below: controller_server has a native-speed first-goal race that SIGSEGVs
+# it (2026-10-21: 2-for-2 on fresh boots, zero reproductions under gdb over
+# 5+ goals - too fast a race to backtrace), and when it dies the lifecycle
+# manager shuts the WHOLE tree down, so recovery = full nav restart.
+start_nav() {
+  echo "== Nav2 (be patient: up to 3 min under boot contention) =="
+  pkill -f "tiago_navigation[.]launch" 2>/dev/null
+  pkill -f "nav2_[a-z]"          2>/dev/null
+  pkill -f "lifecycle_[m]anager" 2>/dev/null
+  sleep 3
+  cd "$WS" && nohup ros2 launch br2_navigation tiago_navigation.launch.py \
+    map:=$WS/src/wr_bringup/maps/warehouse.yaml \
+    params_file:=$WS/src/wr_bringup/config/tiago_nav_params.yaml > /tmp/nav_launch.log 2>&1 &
+  for i in $(seq 1 90); do
+    sleep 2
+    [ "$(grep -c 'Managed nodes are active' /tmp/nav_launch.log)" -ge 2 ] && break
+  done
+  # The CLI lifecycle tool silently no-ops when service responses are lost
+  # under load (and the lifecycle manager itself can stall waiting for the
+  # planner's configure response). This direct python driver is robust.
+  python3 - <<'PYEOF'
+import sys, time
+import rclpy
 from rclpy.node import Node
 from lifecycle_msgs.srv import ChangeState, GetState
 from lifecycle_msgs.msg import Transition
@@ -310,6 +321,7 @@ def drive(name, tr):
     fut = c.call_async(req); t0 = time.time()
     while not fut.done() and time.time()-t0 < 60:
         rclpy.spin_once(n, timeout_sec=0.5)
+ok = True
 for name in ['map_server', 'amcl', 'controller_server', 'planner_server',
              'smoother_server', 'behavior_server', 'waypoint_follower',
              'velocity_smoother', 'bt_navigator']:
@@ -318,21 +330,64 @@ for name in ['map_server', 'amcl', 'controller_server', 'planner_server',
         if st == 3: break
         if st == 1: drive(name, Transition.TRANSITION_CONFIGURE)
         if st in (1, 2): drive(name, Transition.TRANSITION_ACTIVATE)
-    print(f"{name}: {'ACTIVE' if get_state(name) == 3 else 'NOT-ACTIVE'}")
+    active = get_state(name) == 3
+    ok = ok and active
+    print(f"{name}: {'ACTIVE' if active else 'NOT-ACTIVE'}")
 rclpy.shutdown()
+sys.exit(0 if ok else 1)
 PYEOF
+}
+
+# One controlled first-goal: send a trivial NavigateToPose and then verify
+# the controller SURVIVED (its result does not matter - only liveness does).
+# Returns nonzero if the controller died on it.
+warmup_goal() {
+  python3 - <<'PYEOF'
+import sys, time
+import rclpy
+from rclpy.node import Node
+from rclpy.action import ActionClient
+from nav2_msgs.action import NavigateToPose
+from lifecycle_msgs.srv import GetState
+rclpy.init()
+n = Node('warmup')
+client = ActionClient(n, NavigateToPose, '/navigate_to_pose')
+if not client.wait_for_server(timeout_sec=15.0):
+    print('   warm-up: no navigate_to_pose server'); rclpy.shutdown(); sys.exit(1)
+goal = NavigateToPose.Goal()
+goal.pose.header.frame_id = 'map'
+goal.pose.pose.position.x = 0.3
+goal.pose.pose.position.y = 0.0
+goal.pose.pose.orientation.w = 1.0
+fut = client.send_goal_async(goal)
+rclpy.spin_until_future_complete(n, fut, timeout_sec=10.0)
+rf = fut.result().get_result_async() if fut.result() and fut.result().accepted else None
+t0 = time.time()
+if rf:
+    while not rf.done() and time.time()-t0 < 30:
+        rclpy.spin_once(n, timeout_sec=0.5)
+    print('   warm-up goal finished' if rf.done() else '   warm-up goal timed out (liveness is what matters)')
+c = n.create_client(GetState, '/controller_server/get_state')
+alive = False
+if c.wait_for_service(timeout_sec=5.0):
+    f = c.call_async(GetState.Request()); t0 = time.time()
+    while not f.done() and time.time()-t0 < 10:
+        rclpy.spin_once(n, timeout_sec=0.3)
+    alive = f.done() and f.result().current_state.id == 3
+print('   controller after warm-up:', 'ALIVE' if alive else 'DEAD (first-goal crash)')
+rclpy.shutdown()
+sys.exit(0 if alive else 1)
+PYEOF
+}
+
+# ---------------- Nav2 up + seed + readiness gate + first-goal warm-up ----
+start_nav || { echo "FAIL: nav2 never became fully active"; exit 1; }
 
 echo "== [4/5] AMCL seed (robot spawns at map origin) =="
 seed_amcl 0.0 0.0 0.0 && echo "   seeded (0,0,0) - persistent best-effort publisher"
 
-# Readiness gate: the first FollowPath goal arriving before the local
-# costmap's first update completes SEGFAULTED controller_server on
-# 2026-10-21 (exit -11 one second after "begin computing control effort",
-# corroborated by behavior_server's "Current footprint not available").
-# The identical goal under gdb on a settled stack drove to the goal cleanly
-# - an initialization race, not a logic bug. Never hand the demo a
-# half-born costmap: wait for the first /local_costmap/costmap publish and
-# verify the controller is still alive.
+# Readiness gate: wait for the first local costmap publish and verify the
+# controller is alive before any goal touches it.
 python3 - <<'PYEOF'
 import sys, time
 import rclpy
@@ -363,8 +418,27 @@ else:
 rclpy.shutdown()
 PYEOF
 
+# First-goal warm-up with recovery: the controller's FIRST FollowPath goal
+# after a fresh activation has a native-speed race that SIGSEGVs it (never
+# reproduced under gdb - see start_nav comment). Absorb that dangerous first
+# goal with a trivial warm-up; if it kills the controller, restart nav2 and
+# try again (bounded). Every observed goal AFTER a surviving first one ran
+# clean, so getting past goal #1 de-risks the whole demo/patrol.
+warmup_attempt=0
+until warmup_goal; do
+  warmup_attempt=$((warmup_attempt+1))
+  if [ $warmup_attempt -gt 2 ]; then
+    echo "FAIL: controller_server keeps dying on its first goal - see /tmp/nav_launch.log"
+    exit 1
+  fi
+  echo "   restarting nav2 for warm-up retry $((warmup_attempt+1))/2..."
+  start_nav || { echo "FAIL: nav2 restart failed"; exit 1; }
+  seed_amcl 0.0 0.0 0.0
+done
+echo "   warm-up survived - controller is past its dangerous first goal"
+
 if [ "$MODE" = "--no-demo" ]; then
-  echo "== stack ready (no demo). Iterate with: bringup_m6.sh --demo-only =="
+  echo "== stack ready (no demo, first goal absorbed). Iterate with: bringup_m6.sh --demo-only =="
   exit 0
 fi
 
