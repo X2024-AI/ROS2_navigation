@@ -178,6 +178,24 @@ launch_sim() {
   cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
 }
 
+# Kill a running sim attempt COMPLETELY: launch parent first (so ros2 launch
+# tears down its children), then stragglers, then the per-session PAL nodes
+# (play_motion2 / twist_mux / move_group ...). These LEAK through a plain
+# pkill and poison the NEXT attempt with duplicate action servers
+# ("Goal was rejected by server" / "unknown result response" - the cascade
+# that turned one dud boot into three on 2026-10-21).
+kill_sim_tree() {
+  pkill -f "warehouse_sim[.]launch" 2>/dev/null
+  pkill -f "gzserver" 2>/dev/null
+  pkill -f "gzclient" 2>/dev/null
+  for gp in $(ps -eo pid,cmd | grep -E "play_motion2|twist_mux|move_group|joystick_relay|add_analyzer" | grep -v grep | awk '{print $1}'); do
+    kill "$gp" 2>/dev/null
+  done
+  sleep 2
+  pkill -9 -f "gzserver" 2>/dev/null
+  rm -rf /dev/shm/fastrtps_* 2>/dev/null
+}
+
 # a sim is USABLE only if both the laser and the ros2_control controllers
 # come up; controllers lose their boot race under load ("Joint ... not
 # claimed by any active controller") and never self-heal -> relaunch
@@ -194,12 +212,14 @@ launch_sim    # the until-body only runs AFTER a failed wait - without this
               # was never started ("stuck at the first step")
 until wait_for_scan && { sleep 10; controllers_ok; }; do
   sim_attempt=$((sim_attempt+1))
-  [ $sim_attempt -gt 2 ] && { echo "FAIL: sim never became usable (3 attempts)"; exit 1; }
+  if [ $sim_attempt -gt 2 ]; then
+    echo "FAIL: sim never became usable (3 attempts) - cleaning up"
+    kill_sim_tree
+    exit 1
+  fi
   echo "   sim unusable (laser or controllers) - relaunching (attempt $((sim_attempt+1))/3)..."
-  pkill -f "gzserver" 2>/dev/null; pkill -f "gzclient" 2>/dev/null
-  pkill -f "warehouse_sim[.]launch" 2>/dev/null
-  sleep 5
-  rm -rf /dev/shm/fastrtps_* 2>/dev/null
+  kill_sim_tree
+  sleep 3
   launch_sim
 done
 echo "   sim usable (laser + controllers)"
