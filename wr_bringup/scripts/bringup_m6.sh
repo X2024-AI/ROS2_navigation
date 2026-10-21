@@ -163,7 +163,7 @@ wait_for_scan() {
   # shows its laser within ~1 minute; every longer wait turned out to be a
   # dud. Short gate + fast relaunch cycles beats long patient waits.
   local waited=0
-  while [ $waited -lt 60 ]; do
+  while [ $waited -lt 90 ]; do
     sleep 4; waited=$((waited+4))
     if timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$"; then
       echo "   /scan_raw up after ${waited}s"
