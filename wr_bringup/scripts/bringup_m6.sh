@@ -296,6 +296,44 @@ PYEOF
 echo "== [4/5] AMCL seed (robot spawns at map origin) =="
 seed_amcl 0.0 0.0 0.0 && echo "   seeded (0,0,0) - persistent best-effort publisher"
 
+# Readiness gate: the first FollowPath goal arriving before the local
+# costmap's first update completes SEGFAULTED controller_server on
+# 2026-10-21 (exit -11 one second after "begin computing control effort",
+# corroborated by behavior_server's "Current footprint not available").
+# The identical goal under gdb on a settled stack drove to the goal cleanly
+# - an initialization race, not a logic bug. Never hand the demo a
+# half-born costmap: wait for the first /local_costmap/costmap publish and
+# verify the controller is still alive.
+python3 - <<'PYEOF'
+import sys, time
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import OccupancyGrid
+from lifecycle_msgs.srv import GetState
+rclpy.init()
+n = Node('readiness_gate')
+got = []
+n.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: got.append(1), 5)
+t0 = time.time()
+while not got and time.time()-t0 < 25:
+    rclpy.spin_once(n, timeout_sec=0.5)
+print('   local costmap:', 'publishing' if got else 'no update in 25 s (continuing with caution)')
+c = n.create_client(GetState, '/controller_server/get_state')
+if c.wait_for_service(timeout_sec=5.0):
+    f = c.call_async(GetState.Request()); t0 = time.time()
+    while not f.done() and time.time()-t0 < 10:
+        rclpy.spin_once(n, timeout_sec=0.3)
+    st = f.result().current_state.id if f.done() else -1
+    if st != 3:
+        print(f'   FAIL: controller_server state={st} - check /tmp/nav_launch.log for "process has died"')
+        rclpy.shutdown(); sys.exit(1)
+    print('   controller_server: ACTIVE')
+else:
+    print('   FAIL: controller_server service missing (crashed?) - check /tmp/nav_launch.log')
+    rclpy.shutdown(); sys.exit(1)
+rclpy.shutdown()
+PYEOF
+
 if [ "$MODE" = "--no-demo" ]; then
   echo "== stack ready (no demo). Iterate with: bringup_m6.sh --demo-only =="
   exit 0
