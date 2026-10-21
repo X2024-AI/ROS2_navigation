@@ -159,23 +159,32 @@ done
 ros2 daemon start >/dev/null 2>&1 || true
 
 wait_for_scan() {
-  # the TIAGo sim cold-boot takes 3-8 min under desktop load (gzserver
-  # ~175% CPU while loading world/controllers/MoveIt); ~1 in 5 launches is
-  # a dud whose laser never appears and needs a relaunch
+  # Empirical rule (user-observed, confirmed 2026-10-21): a healthy sim
+  # shows its laser within ~1 minute; every longer wait turned out to be a
+  # dud. Short gate + fast relaunch cycles beats long patient waits.
   local waited=0
-  while [ $waited -lt 480 ]; do
+  while [ $waited -lt 60 ]; do
     sleep 4; waited=$((waited+4))
     if timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$"; then
       echo "   /scan_raw up after ${waited}s"
       return 0
     fi
-    [ $((waited % 60)) -eq 0 ] && echo "   still booting... ${waited}s (normal: 3-8 min under load)"
+    [ $((waited % 20)) -eq 0 ] && echo "   still booting... ${waited}s (healthy boots are fast; slow ones turn out duds)"
   done
   return 1
 }
 
 launch_sim() {
   cd "$WS" && nohup ros2 launch wr_bringup warehouse_sim.launch.py > /tmp/sim_launch.log 2>&1 &
+  # HEADLESS by default: on this hybrid-NVIDIA host, gzclient's GL context
+  # contends with gzserver's sensor rendering - with the GUI alive the laser
+  # never initializes (5 dud boots on 2026-10-21); with gzclient killed at
+  # t+10s the laser AND controllers come up in ~40 s (proven live). The
+  # pipeline needs no Gazebo window (watch in RViz instead).
+  # Set KEEP_GUI=1 to keep the Gazebo window for manual sessions.
+  if [ "${KEEP_GUI:-0}" != "1" ]; then
+    ( sleep 10; pkill -f "gzclient" 2>/dev/null ) &
+  fi
 }
 
 # Kill a running sim attempt COMPLETELY: launch parent first (so ros2 launch
@@ -212,12 +221,12 @@ launch_sim    # the until-body only runs AFTER a failed wait - without this
               # was never started ("stuck at the first step")
 until wait_for_scan && { sleep 10; controllers_ok; }; do
   sim_attempt=$((sim_attempt+1))
-  if [ $sim_attempt -gt 2 ]; then
-    echo "FAIL: sim never became usable (3 attempts) - cleaning up"
+  if [ $sim_attempt -gt 4 ]; then
+    echo "FAIL: sim never became usable (5 attempts) - cleaning up"
     kill_sim_tree
     exit 1
   fi
-  echo "   sim unusable (laser or controllers) - relaunching (attempt $((sim_attempt+1))/3)..."
+  echo "   sim unusable (laser or controllers) - relaunching (attempt $((sim_attempt+1))/5)..."
   kill_sim_tree
   sleep 3
   launch_sim
