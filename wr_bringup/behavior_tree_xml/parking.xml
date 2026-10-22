@@ -37,9 +37,17 @@
               </Fallback>
             </RetryUntilSuccessful>
 
-            <!-- (3) stable final verification: 5 consecutive good frames -->
-            <StableDockVerify dock="{dock_final_pose}"
-                              pos_tol="0.02" yaw_tol="0.00873" hold_frames="5"/>
+            <!-- (3) stable final verification: 5 consecutive good frames.
+                 StableDockVerify is a CONDITION that needs N consecutive
+                 in-tolerance ticks - unwrapped, its first FAILURE flowed
+                 straight to the back_off branch and one perfect frame could
+                 never become five (docked pose reached 3x, rejected in 10 ms,
+                 2026-10-22). The retry wrapper re-ticks it at tree rate:
+                 60 attempts x 10 Hz = 6 s verification window. -->
+            <RetryUntilSuccessful num_attempts="60">
+              <StableDockVerify dock="{dock_final_pose}"
+                                pos_tol="0.02" yaw_tol="0.00873" hold_frames="5"/>
+            </RetryUntilSuccessful>
 
           </Sequence>
 
