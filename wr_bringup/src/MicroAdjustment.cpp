@@ -255,11 +255,11 @@ MicroAdjustment::poll_step()
   // blew the error up mid-loop, virtual-robot log 2026-10-22). Canceling an
   // already-terminal goal is a harmless no-op.
   if (current_.type == Step::Type::DRIVE && drive_handle_) {
-    drive_handle_->cancel_goal(nullptr);
+    drive_client_->async_cancel_goal(drive_handle_);
   } else if (current_.type == Step::Type::BACK && backup_handle_) {
-    backup_handle_->cancel_goal(nullptr);
+    backup_client_->async_cancel_goal(backup_handle_);
   } else if (current_.type == Step::Type::SPIN && spin_handle_) {
-    spin_handle_->cancel_goal(nullptr);
+    spin_client_->async_cancel_goal(spin_handle_);
   }
 
   spin_handle_ = nullptr;
