@@ -17,7 +17,9 @@
                           distance_threshold="1.0" slow_speed="0.0"/>
 
             <!-- (2) closed-loop micro pose adjustment -->
-            <RetryUntilSuccessful num_attempts="5">
+            <!-- each correction consumes one attempt (AlwaysFailure terminator),
+                 so budget for ~2 halvings per axis + yaw dither -->
+            <RetryUntilSuccessful num_attempts="12">
               <Fallback name="check_or_correct">
                 <CheckPoseTolerance dock="{dock_final_pose}"
                                     pos_tol="0.02" yaw_tol="0.00873"/>

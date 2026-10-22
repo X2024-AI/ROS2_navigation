@@ -249,6 +249,19 @@ MicroAdjustment::poll_step()
     status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
   }
 
+  // Abandoned steps must be CANCELED server-side: the status topic on this
+  // host lags the result, and walking away while the action still runs lets
+  // it keep driving the base (measured: a lateral step ran away by >2 m and
+  // blew the error up mid-loop, virtual-robot log 2026-10-22). Canceling an
+  // already-terminal goal is a harmless no-op.
+  if (current_.type == Step::Type::DRIVE && drive_handle_) {
+    drive_handle_->cancel_goal(nullptr);
+  } else if (current_.type == Step::Type::BACK && backup_handle_) {
+    backup_handle_->cancel_goal(nullptr);
+  } else if (current_.type == Step::Type::SPIN && spin_handle_) {
+    spin_handle_->cancel_goal(nullptr);
+  }
+
   spin_handle_ = nullptr;
   drive_handle_ = nullptr;
   backup_handle_ = nullptr;
@@ -284,11 +297,15 @@ MicroAdjustment::tick()
     // repeating with spins executing but the error never re-measured).
     started_ = true;
     build_plan();
-    if (plan_.empty()) {return BT::NodeStatus::SUCCESS;}   // nothing to correct
+    if (plan_.empty()) {started_ = false; return BT::NodeStatus::SUCCESS;}
   }
 
   if (phase_ == Phase::IDLE) {
-    if (plan_.empty()) {return BT::NodeStatus::SUCCESS;}   // all steps done -> re-measure
+    // reset started_ on completion: the NEXT activation (after the parent's
+    // re-measurement) must rebuild from fresh ports - a lingering true flag
+    // made every later activation return SUCCESS instantly without
+    // correcting (the microsecond retry burst, virtual-robot log 2026-10-22)
+    if (plan_.empty()) {started_ = false; return BT::NodeStatus::SUCCESS;}
     current_ = plan_.front();
     plan_.pop_front();
     return start_step();
