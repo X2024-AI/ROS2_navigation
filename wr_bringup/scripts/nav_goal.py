@@ -85,24 +85,27 @@ def main():
     goal.behavior_tree = args.bt
     log.info(f'goal ({args.x:.2f}, {args.y:.2f}, yaw {yaw:.2f}) via {os.path.basename(args.bt)}')
 
-    fut = client.send_goal_async(goal)
+    import time
+    last_fb = {'sec': -1}
+
+    def on_feedback(feedback_handle):
+        fb = feedback_handle.feedback
+        now = (n.get_clock().now() - t0).nanoseconds / 1e9
+        if fb and int(now) != last_fb['sec']:
+            last_fb['sec'] = int(now)
+            log.info(f'{fb.distance_remaining:6.2f} m remaining ({now:.0f} s)')
+
+    t0 = n.get_clock().now()
+    fut = client.send_goal_async(goal, feedback_callback=on_feedback)
     rclpy.spin_until_future_complete(n, fut, timeout_sec=15.0)
     if not fut.result() or not fut.result().accepted:
         log.error('goal rejected')
         raise SystemExit(1)
     result_fut = fut.result().get_result_async()
 
-    t0 = n.get_clock().now()
-    last_sec = -1
-    import time
     t0w = time.time()
     while not result_fut.done() and time.time() - t0w < args.timeout:
         rclpy.spin_once(n, timeout_sec=0.5)
-        fb = fut.result().feedback if hasattr(fut.result(), 'feedback') else None
-        now = (n.get_clock().now() - t0).nanoseconds / 1e9
-        if fb and int(now) != last_sec:
-            last_sec = int(now)
-            log.info(f'{fb.distance_remaining:6.2f} m remaining ({now:.0f} s)')
 
     status = result_fut.result().status if result_fut.done() else GoalStatus.STATUS_UNKNOWN
     verdict = {GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
