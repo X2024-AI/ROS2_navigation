@@ -28,7 +28,7 @@ find_package(pluginlib REQUIRED)
 install(DIRECTORY launch config behavior_tree_xml
     DESTINATION share/${PROJECT_NAME})
 
-install(PROGRAMS scripts/waypoint_patrol.py scripts/bringup_m6.sh scripts/tuck_arm_retry.sh scripts/odom_tf_bridge.py
+install(PROGRAMS scripts/waypoint_patrol.py scripts/nav_goal.py scripts/bringup_m6.sh scripts/tuck_arm_retry.sh scripts/odom_tf_bridge.py scripts/particle_relay.py
   DESTINATION lib/${PROJECT_NAME})
 
 # ---- M6: behavior-tree parking nodes ----
@@ -81,7 +81,7 @@ ament_target_dependencies(odom_tf_bridge_cpp rclcpp geometry_msgs nav_msgs tf2_r
 
 add_executable(parking_bt src/parking_bt_main.cpp)
 ament_target_dependencies(parking_bt ${BT_DEPENDENCIES})
-target_link_libraries(parking_bt zmq)
+target_link_libraries(parking_bt zmq wr_check_pose_tol_bt_node)
 target_include_directories(parking_bt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 

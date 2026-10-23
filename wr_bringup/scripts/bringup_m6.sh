@@ -120,6 +120,7 @@ pkill -f "lifecycle_[m]anager" 2>/dev/null
 pkill -f "topic_tool[s]/relay" 2>/dev/null
 pkill -f "odom_[r]elay_cpp" 2>/dev/null
 pkill -f "odom_tf_[b]ridge" 2>/dev/null
+pkill -f "particle_rela[y]" 2>/dev/null
 pkill -f "gzserver" 2>/dev/null
 pkill -f "gzclient" 2>/dev/null
 pkill -f "ros2-daemon" 2>/dev/null
@@ -343,16 +344,27 @@ import sys, time
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import qos_profile_sensor_data
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.msg import ParticleCloud
 from lifecycle_msgs.srv import GetState
 rclpy.init()
 n = Node('warmup')
 client = ActionClient(n, NavigateToPose, '/navigate_to_pose')
 if not client.wait_for_server(timeout_sec=15.0):
     print('   warm-up: no navigate_to_pose server'); rclpy.shutdown(); sys.exit(1)
+# AMCL liveness probe: while the robot moves the filter must publish particle
+# updates. Zero during a >=1 m drive = the scan pipeline is stalled inside
+# amcl (host DDS-reader pathology, proven 2026-10-23: one sub of a node dies
+# while its siblings stream). amcl then dead-reckons and every goal
+# "succeeds" metres from the truth with zero log output.
+particles = [0]
+n.create_subscription(ParticleCloud, '/particle_cloud',
+                      lambda m: particles.__setitem__(0, particles[0] + 1),
+                      qos_profile_sensor_data)
 goal = NavigateToPose.Goal()
 goal.pose.header.frame_id = 'map'
-goal.pose.pose.position.x = 0.3
+goal.pose.pose.position.x = 1.0
 goal.pose.pose.position.y = 0.0
 goal.pose.pose.orientation.w = 1.0
 fut = client.send_goal_async(goal)
@@ -371,8 +383,14 @@ if c.wait_for_service(timeout_sec=5.0):
         rclpy.spin_once(n, timeout_sec=0.3)
     alive = f.done() and f.result().current_state.id == 3
 print('   controller after warm-up:', 'ALIVE' if alive else 'DEAD (first-goal crash)')
+print(f'   amcl particle updates during warm-up: {particles[0]}')
 rclpy.shutdown()
-sys.exit(0 if alive else 1)
+if not alive:
+    sys.exit(1)
+if particles[0] == 0:
+    print('   amcl filter NEVER updated while moving - scan pipeline stalled')
+    sys.exit(2)
+sys.exit(0)
 PYEOF
 }
 
@@ -424,17 +442,27 @@ warmup_attempt=0
 until warmup_goal; do
   warmup_attempt=$((warmup_attempt+1))
   if [ $warmup_attempt -gt 2 ]; then
-    echo "FAIL: controller_server keeps dying on its first goal - see /tmp/nav_launch.log"
+    echo "FAIL: warm-up keeps failing. Either the controller first-goal crash"
+    echo "      (/tmp/nav_launch.log) or the AMCL scan-pipeline stall (zero particle"
+    echo "      updates while moving). A nav2 restart creates a fresh amcl process"
+    echo "      with fresh DDS readers and usually cures the stall; if retries keep"
+    echo "      stalling, REBOOT - the session's DDS is poisoned (2026-10-23)."
     exit 1
   fi
   echo "   restarting nav2 for warm-up retry $((warmup_attempt+1))/2..."
   start_nav || { echo "FAIL: nav2 restart failed"; exit 1; }
   seed_amcl 0.0 0.0 0.0
 done
-echo "   warm-up survived - controller is past its dangerous first goal"
+echo "   warm-up survived - controller past its first goal, AMCL filter updating"
+
+# Particle relay for RViz: nav2 amcl publishes nav2_msgs/ParticleCloud, which
+# RViz2 cannot display; the relay repacks it as PoseArray on /particle_cloud_pa
+# (display configured in rviz/monitor.rviz)
+nohup ros2 run wr_bringup particle_relay.py > /tmp/particle_relay.log 2>&1 &
 
 if [ "$MODE" = "--no-demo" ]; then
   echo "== stack ready (no demo, first goal absorbed). Iterate with: bringup_m6.sh --demo-only =="
+  echo "   monitor: rviz2 -d $WS/src/wr_bringup/rviz/monitor.rviz   (costmaps + AMCL particles via relay)"
   exit 0
 fi
 

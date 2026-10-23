@@ -32,7 +32,9 @@ Visualization Manager:
     - Class: rviz_default_plugins/PoseArray
       Name: AMCL Particles
       Topic:
-        Value: /particle_cloud
+        # nav2 amcl publishes nav2_msgs/ParticleCloud; particle_relay.py
+        # repacks it as PoseArray on this topic
+        Value: /particle_cloud_pa
         Depth: 5
         Reliability Policy: Best Effort
       Enabled: true
@@ -76,6 +78,33 @@ Visualization Manager:
       Line Style: Billions
       Line Width: 0.02
       Color: 0;180;255
+    # Humble RViz2 has no Costmap display class - a Map display pointed at
+    # the costmap OccupancyGrid topic with the "costmap" color scheme is the
+    # standard idiom
+    - Class: rviz_default_plugins/Map
+      Name: Global Costmap
+      Topic:
+        Value: /global_costmap/costmap
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Enabled: true
+      Value: true
+      Color Scheme: costmap
+      Alpha: 0.4
+      Draw Behind: true
+    - Class: rviz_default_plugins/Map
+      Name: Local Costmap
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Enabled: true
+      Value: true
+      Color Scheme: costmap
+      Alpha: 0.25
+      Draw Behind: true
   Global Options:
     Background Color: 230; 230; 230
     Fixed Frame: map
