@@ -7,28 +7,31 @@
 
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/behavior_tree.h"
-#include "nav2_msgs/action/back_up.hpp"
-#include "nav2_msgs/action/drive_on_heading.hpp"
-#include "nav2_msgs/action/spin.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "wr_bringup/CheckPoseTolerance.hpp"
-#include "rclcpp_action/rclcpp_action.hpp"
 
 namespace wr_bringup
 {
 
 // Stateful action (v3: ActionNodeBase + member state): executes the
-// correction chosen by CalcPoseError using nav2 behavior_server primitives
-// (dead-reckoned, odometry-serviced - and immune to controller speed
-// limits). Differential drive has no strafe, so a lateral correction
-// becomes spin(+-90) -> drive -> spin(back).
+// correction chosen by CalcPoseError. Differential drive has no strafe, so
+// a lateral correction becomes spin(+-90) -> drive -> spin(back).
 // Step rule: half of the current error, floored at half the tolerance
 // (no-overshoot convergence, per design).
-// All action-client waits are NON-BLOCKING (acceptance and result are
-// polled across ticks) - a blocking .get() inside tick() can deadlock the
-// single-threaded BT loop against spin_some().
+//
+// ALL step types execute DIRECTLY: velocity on the twist-mux keyboard
+// input, closed loop on the tree-wide shared odometry hub. The nav2
+// behavior_server path (DriveOnHeading/BackUp actions) was abandoned on
+// 2026-10-24 - on the real stack those goals proved unreliable exactly
+// where the demo needs them: instant "Collision Ahead" aborts from the
+// local costmap inflation zone that surrounds the dock, 15 s "exceeded
+// time allowance" stalls with a frozen base, goal statuses that never
+// arrive, and goal handles the Humble client erases once their result is
+// taken (canceling then throws). Direct closed-loop moves at crawl speed
+// in the creep zone replace all of it; the yaw steps already worked this
+// way with <= 0.002 rad accuracy.
 class MicroAdjustment : public BT::ActionNodeBase
 {
 public:
@@ -54,58 +57,33 @@ private:
   struct Step
   {
     enum class Type {DRIVE, BACK, SPIN} type;
-    double value;   // DRIVE/BACK: metres; SPIN: radians (+ CCW)
+    double value;   // DRIVE/BACK: metres (DRIVE ahead, BACK reverse); SPIN: radians (+ CCW)
   };
 
   void build_plan();
-  BT::NodeStatus start_step();     // send goal, move to AWAIT_ACCEPT
-  BT::NodeStatus poll_step();      // acceptance -> result -> next step
-
-  rclcpp_action::Client<nav2_msgs::action::DriveOnHeading>::SharedPtr drive_client_;
-  rclcpp_action::Client<nav2_msgs::action::BackUp>::SharedPtr backup_client_;
-  rclcpp_action::Client<nav2_msgs::action::Spin>::SharedPtr spin_client_;
+  BT::NodeStatus start_step();     // snapshot the start pose, arm the step
+  BT::NodeStatus poll_step();      // per-tick closed-loop progress
 
   std::deque<Step> plan_;
   Step current_{Step::Type::DRIVE, 0.0};
-  enum class Phase {IDLE, AWAIT_ACCEPT, AWAIT_RESULT} phase_{Phase::IDLE};
+  bool step_active_{false};
+  double step_speed_{0.05};
 
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::DriveOnHeading>::SharedPtr>
-  drive_accept_fut_;
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::BackUp>::SharedPtr>
-  backup_accept_fut_;
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::Spin>::SharedPtr>
-  spin_accept_fut_;
-
-  // result futures: on this stack the goal handle's status only updates
-  // once a result request is in flight, so completion is polled here
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::DriveOnHeading>::
-  WrappedResult> drive_result_fut_;
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::BackUp>::
-  WrappedResult> backup_result_fut_;
-  std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::Spin>::
-  WrappedResult> spin_result_fut_;
-
-  rclcpp_action::ClientGoalHandle<nav2_msgs::action::DriveOnHeading>::SharedPtr drive_handle_;
-  rclcpp_action::ClientGoalHandle<nav2_msgs::action::BackUp>::SharedPtr backup_handle_;
-  rclcpp_action::ClientGoalHandle<nav2_msgs::action::Spin>::SharedPtr spin_handle_;
-
-  // direct rotation (behavior-server Spin aborts on costmap collision
-  // checks near the dock): publish on the twist-mux keyboard input and
-  // close the loop on our own odometry sample
+  // direct velocity publisher (twist-mux keyboard input - publish >= 2 Hz
+  // or the mux times the input out) and the shared self-healing odometry
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
-  // odometry via the tree-wide self-healing shared freezer
   std::shared_ptr<MapOdomFreezer> hub_;
-  double spin_start_yaw_{0.0};
-  bool started_{false};   // one correction plan per activation
+
+  // per-step reference snapshot, odom frame
+  double ref_yaw_{0.0};
+  double ref_x_{0.0}, ref_y_{0.0};
+  double head_x_{1.0}, head_y_{0.0};
+  rclcpp::Time step_t0_;
+  std::chrono::steady_clock::time_point step_t0_wall_{};   // pause-immune timeouts
+  std::chrono::steady_clock::time_point settle_until_{};   // inter-step pause
 
   double hub_yaw() const;
-  bool spin_active_{false};
-
-  rclcpp::Time step_t0_;
-  bool result_arrived_{false};
-  bool status_polling_{false};
-  rclcpp::Time status_t0_;   // result future done; give the status topic
-  // one extra spin cycle before trusting get_status()
+  bool started_{false};   // one correction plan per activation
 };
 
 }  // namespace wr_bringup

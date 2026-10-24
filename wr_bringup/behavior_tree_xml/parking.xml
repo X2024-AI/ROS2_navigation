@@ -17,9 +17,10 @@
                           distance_threshold="1.0" slow_speed="0.0"/>
 
             <!-- (2) closed-loop micro pose adjustment -->
-            <!-- each correction consumes one attempt (AlwaysFailure terminator),
-                 so budget for ~2 halvings per axis + yaw dither -->
-            <RetryUntilSuccessful num_attempts="12">
+            <!-- each correction consumes one attempt (AlwaysFailure terminator).
+                 Spin slip-drift (~2.5 cm/cycle) eats part of every lateral
+                 correction, so budget generously: ~2-3 cycles per axis -->
+            <RetryUntilSuccessful num_attempts="25">
               <Fallback name="check_or_correct">
                 <CheckPoseTolerance dock="{dock_final_pose}"
                                     pos_tol="0.02" yaw_tol="0.00873"/>

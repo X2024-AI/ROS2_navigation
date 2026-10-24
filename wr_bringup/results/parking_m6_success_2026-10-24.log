@@ -1,0 +1,151 @@
+== [1/5] simulation ==
+   /scan_raw streaming after 4s
+   sim usable (laser + controllers)
+== [2/5] odometry gate (SINGLE SOURCE) ==
+   wheel odom alive -> C++ relay to /odom (M5 topology)
+   /odom OK
+   native odom->base TF present - GT bridge NOT started (single source)
+== Nav2 (be patient: up to 3 min under boot contention) ==
+map_server: ACTIVE
+amcl: ACTIVE
+controller_server: ACTIVE
+planner_server: ACTIVE
+smoother_server: ACTIVE
+behavior_server: ACTIVE
+waypoint_follower: ACTIVE
+velocity_smoother: ACTIVE
+bt_navigator: ACTIVE
+== [4/5] AMCL seed (robot spawns at map origin) ==
+   seeded (0,0,0) - persistent best-effort publisher
+   local costmap: no update in 25 s (continuing with caution)
+   controller_server: ACTIVE
+   warm-up goal finished
+   controller after warm-up: ALIVE
+   amcl particle updates during warm-up: 2
+   warm-up survived - controller past its first goal, AMCL filter updating
+== [5/5] parking demo ==
+[INFO] [1792832713.365954549] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792832713.667791774] [parking_bt]: "DockApproach" BtActionNode initialized
+[INFO] [1792832713.684201289] [parking_bt]: Waiting for "backup" action server
+[INFO] [1792832713.684476493] [parking_bt]: "Backup" BtActionNode initialized
+[INFO] [1792832713.685996941] [parking_bt]: parking BT started (/home/qx/Codes/Ros2/bookros2_ws/install/wr_bringup/share/wr_bringup/behavior_tree_xml/parking.xml)
+[INFO] [1792832713.686357685] [parking_bt]: dock pose: (2.22, -0.72)
+[INFO] [1792832713.702285508] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792832715.733369464] [parking_bt]: dock approach: 1.38 m from dock
+[INFO] [1792832717.041595634] [parking_bt]: dock approach: 1.09 m from dock
+[INFO] [1792832718.348537730] [parking_bt]: dock approach: 0.83 m from dock
+[INFO] [1792832718.348644624] [parking_bt]: dock approach: 0.83 m (< 1.00) -> creep zone (slow controller)
+[INFO] [1792832719.655709128] [parking_bt]: dock approach: 0.60 m from dock
+[INFO] [1792832720.962718428] [parking_bt]: dock approach: 0.35 m from dock
+[INFO] [1792832721.867200909] [parking_bt]: dock navigation succeeded (0.35 m from dock)
+[INFO] [1792832721.867628087] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=274.1 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.316 result_yaw=-0.564
+[INFO] [1792832721.867687188] [parking_bt]: tolerance check: pos 0.1912 m (lon -0.190, lat +0.018, tol 0.020), yaw +0.0008 rad (tol 0.0087)
+[INFO] [1792832721.867732212] [parking_bt]: error calc: lon -0.1903, lat +0.0180, yaw +0.0008 -> longitudinal (-0.1903)
+[INFO] [1792832721.867823351] [parking_bt]: micro adjustment: longitudinal err -0.1903 -> 1 step(s)
+[INFO] [1792832726.687654118] [parking_bt]: micro drive done: 0.093/0.095 m
+[INFO] [1792832726.788322429] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=279.0 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.316 result_yaw=-0.564
+[INFO] [1792832726.788412326] [parking_bt]: tolerance check: pos 0.0975 m (lon -0.096, lat +0.018, tol 0.020), yaw +0.0005 rad (tol 0.0087)
+[INFO] [1792832726.788481815] [parking_bt]: error calc: lon -0.0958, lat +0.0181, yaw +0.0005 -> longitudinal (-0.0958)
+[INFO] [1792832726.788602628] [parking_bt]: micro adjustment: longitudinal err -0.0958 -> 1 step(s)
+[INFO] [1792832729.601488620] [parking_bt]: micro drive done: 0.045/0.048 m
+[INFO] [1792832729.702125924] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=282.0 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.316 result_yaw=-0.565
+[INFO] [1792832729.702216191] [parking_bt]: tolerance check: pos 0.0484 m (lon -0.045, lat +0.018, tol 0.020), yaw +0.0003 rad (tol 0.0087)
+[INFO] [1792832729.702303349] [parking_bt]: error calc: lon -0.0449, lat +0.0181, yaw +0.0003 -> longitudinal (-0.0449)
+[INFO] [1792832729.702422984] [parking_bt]: micro adjustment: longitudinal err -0.0449 -> 1 step(s)
+[INFO] [1792832731.309586628] [parking_bt]: micro drive done: 0.020/0.022 m
+[INFO] [1792832731.410187429] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.410319426] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.410436071] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.410489974] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.410544012] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.410603707] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.410649453] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.410697233] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.410754031] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.410797941] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.410845127] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.410900940] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.410962667] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411012005] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411068200] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411111761] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411158877] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411214343] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411267190] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411316563] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411372942] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411415972] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411462923] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411518069] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411560706] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411608054] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411663675] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411708680] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411755072] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411810589] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.411853183] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.411934110] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.411994851] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412039476] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412088082] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412143944] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412188167] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412234986] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412302144] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412346373] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412394013] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412450301] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412493638] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412540465] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412595973] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412638449] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412685432] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412740643] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412783067] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412830396] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.412887290] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.412930686] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.412977710] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.413033397] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.413090243] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.413139175] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.413195759] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.413238934] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.413296444] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.413352504] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.413395675] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.413442731] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.413498507] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.413543416] [parking_bt]: tolerance check: pos 0.0264 m (lon -0.019, lat +0.018, tol 0.020), yaw -0.0000 rad (tol 0.0087)
+[INFO] [1792832731.413591161] [parking_bt]: error calc: lon -0.0192, lat +0.0181, yaw -0.0000 -> none (+0.0000)
+[INFO] [1792832731.413646712] [parking_bt]: micro adjustment: nothing to correct
+[INFO] [1792832731.428240213] [parking_bt]: Waiting for "backup" action server
+[INFO] [1792832736.825444185] [parking_bt]: backed up, ready to re-approach
+[INFO] [1792832736.837167682] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792832736.838460330] [parking_bt]: dock approach: 0.13 m from dock
+[INFO] [1792832736.838526162] [parking_bt]: dock approach: 0.13 m (< 1.00) -> creep zone (slow controller)
+[INFO] [1792832738.525206560] [parking_bt]: dock navigation succeeded (0.13 m from dock)
+[INFO] [1792832738.525424762] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=290.8 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.347 result_yaw=-0.596
+[INFO] [1792832738.525453606] [parking_bt]: tolerance check: pos 0.1536 m (lon -0.153, lat +0.015, tol 0.020), yaw -0.0306 rad (tol 0.0087)
+[INFO] [1792832738.525489182] [parking_bt]: error calc: lon -0.1529, lat +0.0147, yaw -0.0306 -> longitudinal (-0.1529)
+[INFO] [1792832738.525565615] [parking_bt]: micro adjustment: longitudinal err -0.1529 -> 1 step(s)
+[INFO] [1792832742.525075822] [parking_bt]: micro drive done: 0.073/0.076 m
+[INFO] [1792832742.625188635] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=294.8 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.347 result_yaw=-0.596
+[INFO] [1792832742.625287760] [parking_bt]: tolerance check: pos 0.0789 m (lon -0.078, lat +0.012, tol 0.020), yaw -0.0309 rad (tol 0.0087)
+[INFO] [1792832742.625357703] [parking_bt]: error calc: lon -0.0779, lat +0.0124, yaw -0.0309 -> longitudinal (-0.0779)
+[INFO] [1792832742.625480253] [parking_bt]: micro adjustment: longitudinal err -0.0779 -> 1 step(s)
+[INFO] [1792832745.025115438] [parking_bt]: micro drive done: 0.036/0.039 m
+[INFO] [1792832745.125181987] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=297.3 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.348 result_yaw=-0.596
+[INFO] [1792832745.125275879] [parking_bt]: tolerance check: pos 0.0374 m (lon -0.036, lat +0.011, tol 0.020), yaw -0.0312 rad (tol 0.0087)
+[INFO] [1792832745.125346631] [parking_bt]: error calc: lon -0.0357, lat +0.0111, yaw -0.0312 -> yaw (-0.0312)
+[INFO] [1792832745.125464252] [parking_bt]: micro adjustment: yaw err -0.0312 -> 1 step(s)
+[INFO] [1792832746.125112485] [parking_bt]: micro spin done: 0.015/0.016 rad
+[INFO] [1792832746.225127224] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=298.4 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.326 result_yaw=-0.575
+[INFO] [1792832746.225198914] [parking_bt]: tolerance check: pos 0.0332 m (lon -0.031, lat +0.011, tol 0.020), yaw -0.0100 rad (tol 0.0087)
+[INFO] [1792832746.225234169] [parking_bt]: error calc: lon -0.0313, lat +0.0110, yaw -0.0100 -> longitudinal (-0.0313)
+[INFO] [1792832746.225330951] [parking_bt]: micro adjustment: longitudinal err -0.0313 -> 1 step(s)
+[INFO] [1792832747.525078851] [parking_bt]: micro drive done: 0.013/0.016 m
+[INFO] [1792832747.625132303] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=299.8 amcl=1 map_odom_yaw=-0.249 ob_yaw=-0.314 result_yaw=-0.563
+[INFO] [1792832747.625202842] [parking_bt]: tolerance check: pos 0.0196 m (lon -0.016, lat +0.011, tol 0.020), yaw +0.0024 rad (tol 0.0087)
+[INFO] [1792832747.625276141] [parking_bt]: STABLE DOCK: 5 consecutive frames within tol (pos 0.0196 m, yaw +0.0024 rad)
+[INFO] [1792832747.625481125] [parking_bt]: parking BT finished: SUCCESS after 33 s

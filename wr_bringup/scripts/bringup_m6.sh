@@ -77,7 +77,9 @@ MODE="${1:-}"
 # ================== --demo-only: MUST run before any teardown ==============
 if [ "$MODE" = "--demo-only" ]; then
   echo "== demo-only (reusing running stack) =="
-  timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$" || {
+  # topic-DATA probe: graph queries (`ros2 topic list`) go blind on this
+  # host even while the sim streams - see wait_for_scan
+  timeout 5 ros2 topic hz /scan_raw 2>/dev/null | head -1 | grep -q "average rate" || {
     echo "FAIL: no running stack - first run: bringup_m6.sh --no-demo"; exit 1; }
 
   POSE=$(python3 - <<'PYEOF'
@@ -156,18 +158,25 @@ done
 # A stale daemon with a wedged graph makes every daemon-based gate
 # (`ros2 topic list`, `ros2 control list_controllers`) report blindness
 # while the sim is actually fine - the phantom "dud boots" of Oct 19 were
-# exactly this: healthy sims murdered by a blind gate.
+# exactly this: healthy sims murdered by a blind gate. `daemon start` is a
+# no-op while a wedged daemon lives (2026-10-24), so kill it first.
+pkill -f "ros2cli[.]daemon" 2>/dev/null
+sleep 1
 ros2 daemon start >/dev/null 2>&1 || true
 
 wait_for_scan() {
   # Empirical rule (user-observed, confirmed 2026-10-21): a healthy sim
   # shows its laser within ~1 minute; every longer wait turned out to be a
   # dud. Short gate + fast relaunch cycles beats long patient waits.
+  # Topic-DATA probe (2026-10-24): the old `ros2 topic list` check is a
+  # daemon GRAPH query and went blind mid-session while /scan_raw streamed
+  # at 10 Hz (a "fresh" daemon can still be discovery-wedged) - it killed
+  # healthy sims three times in a row. A live subscription never lies here.
   local waited=0
   while [ $waited -lt 90 ]; do
     sleep 4; waited=$((waited+4))
-    if timeout 3 ros2 topic list 2>/dev/null | grep -q "^/scan_raw$"; then
-      echo "   /scan_raw up after ${waited}s"
+    if timeout 4 ros2 topic hz /scan_raw 2>/dev/null | head -1 | grep -q "average rate"; then
+      echo "   /scan_raw streaming after ${waited}s"
       return 0
     fi
     [ $((waited % 20)) -eq 0 ] && echo "   still booting... ${waited}s (healthy boots are fast; slow ones turn out duds)"
@@ -202,14 +211,25 @@ kill_sim_tree() {
   rm -rf /dev/shm/fastrtps_* 2>/dev/null
 }
 
-# a sim is USABLE only if both the laser and the ros2_control controllers
-# come up; controllers lose their boot race under load ("Joint ... not
-# claimed by any active controller") and never self-heal -> relaunch
+# a sim is USABLE only if the laser streams and the base controller PUBLISHES.
+# NOTE (2026-10-24): this used to be `ros2 control list_controllers` - a
+# SERVICE call - and this host silently loses service responses under load
+# (move_group logged the same /controller_manager/list_controllers read
+# failure in the same session), so the gate killed three HEALTHY sims while
+# /mobile_base_controller/odom streamed at 50 Hz the whole time. Topic
+# transport has never lied here: hz on the diff-drive controller's own
+# output is the direct liveness signal (and this topic is the relay source).
 controllers_ok() {
-  timeout 20 ros2 control list_controllers 2>/dev/null | \
-    grep -c "\\x1b\\[92mactive" | grep -q "[2-9]" && return 0
-  # fallback if colour codes are stripped:
-  [ "$(timeout 20 ros2 control list_controllers 2>/dev/null | grep -c active)" -ge 2 ]
+  # hz probes have startup-latency variance under load (a fresh CLI sub can
+  # need >5 s before its first rate line) - retry so one slow probe cannot
+  # relaunch a healthy sim
+  local i
+  for i in 1 2 3; do
+    timeout 6 ros2 topic hz /mobile_base_controller/odom 2>/dev/null | \
+      head -1 | grep -q "average rate" && return 0
+    sleep 2
+  done
+  return 1
 }
 
 sim_attempt=0
@@ -238,10 +258,11 @@ echo "== [2/5] odometry gate (SINGLE SOURCE) =="
 # alternating +0.34/-1.92 at 120 Hz -> 1/6; wheel-only -> 6/6 in 234 s).
 # M5's topology was wheel-only; the GT bridge now starts ONLY as fallback.
 odom_ok() {
-  timeout 5 ros2 topic info /odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
+  # topic-DATA probe (graph queries go blind on this host - see wait_for_scan)
+  timeout 5 ros2 topic hz /odom 2>/dev/null | head -1 | grep -q "average rate"
 }
 wheel_odom_ok() {
-  timeout 5 ros2 topic info /mobile_base_controller/odom 2>/dev/null | grep -Eq "Publisher count: [1-9]"
+  timeout 5 ros2 topic hz /mobile_base_controller/odom 2>/dev/null | head -1 | grep -q "average rate"
 }
 tf_ok() {
   timeout 4 ros2 run tf2_ros tf2_echo odom base_footprint 2>/dev/null | grep -q "Translation"
@@ -256,23 +277,37 @@ if ! odom_ok; then
       > /tmp/odom_relay.log 2>&1 &
   fi
 fi
+# NOTE: capture the loop's verdict in a flag - a fresh hz re-probe right
+# after success can flake (2026-10-24: "/odom OK" printed, next probe
+# missed, run died) and must not kill a working relay.
+odom_up=0
 for i in $(seq 1 15); do
-  odom_ok && { echo "   /odom OK"; break; }
+  if odom_ok; then odom_up=1; echo "   /odom OK"; break; fi
   sleep 1
 done
-odom_ok || { echo "FAIL: /odom never published"; exit 1; }
+[ "$odom_up" = "1" ] || { echo "FAIL: /odom never published"; exit 1; }
 
 # odom->base TF: use the NATIVE (wheel) TF when present; the GT bridge is
-# a fallback only, never a second concurrent source.
+# a fallback only, never a second concurrent source. Flag-based verdict: a
+# flaky re-probe here could start the bridge BESIDE healthy native TF -
+# dual odom->base publishers are the AMCL scrambler (the Oct-20 unifier).
+tf_up=0
 tf_waited=0
-while ! tf_ok && [ $tf_waited -lt 10 ]; do sleep 2; tf_waited=$((tf_waited+2)); done
-if tf_ok; then
+while [ $tf_waited -lt 10 ]; do
+  if tf_ok; then tf_up=1; break; fi
+  sleep 2; tf_waited=$((tf_waited+2))
+done
+if [ "$tf_up" = "1" ]; then
   echo "   native odom->base TF present - GT bridge NOT started (single source)"
 else
   echo "   native odom->base TF missing -> starting GT bridge fallback"
   nohup ros2 run wr_bringup odom_tf_bridge_cpp > /tmp/odom_tf_bridge.log 2>&1 &
   sleep 3
-  tf_ok && echo "   odom->base TF OK (bridge)" || { echo "FAIL: odom->base TF unavailable even via bridge"; exit 1; }
+  if tf_ok || { sleep 2; tf_ok; }; then
+    echo "   odom->base TF OK (bridge)"
+  else
+    echo "FAIL: odom->base TF unavailable even via bridge"; exit 1
+  fi
 fi
 
 # (Re)start the Nav2 tree. Used at bring-up AND by the warm-up recovery

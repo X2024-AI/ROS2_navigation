@@ -7,8 +7,6 @@
 namespace wr_bringup
 {
 
-using namespace std::chrono_literals;  // NOLINT
-
 MicroAdjustment::MicroAdjustment(
   const std::string & xml_tag_name,
   const BT::NodeConfiguration & conf)
@@ -16,13 +14,6 @@ MicroAdjustment::MicroAdjustment(
 {
   rclcpp::Node::SharedPtr node;
   config().blackboard->get("node", node);
-  drive_client_ = rclcpp_action::create_client<nav2_msgs::action::DriveOnHeading>(
-    node, "drive_on_heading");
-  backup_client_ = rclcpp_action::create_client<nav2_msgs::action::BackUp>(
-    node, "backup");
-  spin_client_ = rclcpp_action::create_client<nav2_msgs::action::Spin>(
-    node, "spin");
-
   vel_pub_ = node->create_publisher<geometry_msgs::msg::Twist>("/key_vel", 10);
   // odometry via the tree-wide self-healing hub (a private subscription
   // proved it can stall silently while another on the same node streams)
@@ -54,8 +45,11 @@ MicroAdjustment::build_plan()
   const double min_yaw_step = yaw_tol / 2.0;
 
   if (type == "lateral") {
-    // half-error step, no-overshoot rule
-    const double step = std::max(std::fabs(magnitude) / 2.0, min_pos_step);
+    // 3/4-error step: in-place spins slip-drift the base ~2.5 cm per
+    // lateral cycle on this floor (measured 2026-10-24), so half-error
+    // steps asymptote at ~2x drift and stall ~5 cm out; a larger fraction
+    // keeps the net reduction positive against the drift floor
+    const double step = std::max(0.75 * std::fabs(magnitude), min_pos_step);
     if (magnitude > 0) {            // robot left of axis -> sidestep right
       plan_.push_back({Step::Type::SPIN, -M_PI / 2});
       plan_.push_back({Step::Type::DRIVE, step});
@@ -92,36 +86,25 @@ MicroAdjustment::start_step()
   config().blackboard->get("node", node);
   double speed = 0.05;
   getInput("speed", speed);
+  step_speed_ = std::max(0.01, std::fabs(speed));
 
-  if (current_.type == Step::Type::SPIN) {
-    // direct execution: behavior-server Spin aborts on collision checks
-    step_t0_ = node->now();   // BEFORE the early return: node clock is
-    // RCL_ROS_TIME; an unassigned (system-time) member would throw on the
-    // timeout subtraction every tick
-    spin_active_ = true;
-    // ALWAYS the fresh pose, not a value gated on spin_active_
-    // (a stale start reference once completed a step instantly, 6x overshoot)
-    spin_start_yaw_ = hub_yaw();
-    phase_ = Phase::AWAIT_RESULT;   // poll_step handles completion below
-    return BT::NodeStatus::RUNNING;
-  } else if (current_.type == Step::Type::DRIVE) {
-    auto goal = nav2_msgs::action::DriveOnHeading::Goal();
-    goal.target.x = current_.value;
-    goal.speed = static_cast<float>(speed);
-    goal.time_allowance.sec = 15;
-    drive_accept_fut_ = drive_client_->async_send_goal(goal);
-  } else {   // BACK
-    auto goal = nav2_msgs::action::BackUp::Goal();
-    goal.target.x = -current_.value;   // negative x = reverse
-    goal.speed = static_cast<float>(speed);
-    goal.time_allowance.sec = 15;
-    backup_accept_fut_ = backup_client_->async_send_goal(goal);
-  }
-
+  // snapshot the CURRENT pose as the step reference - always fresh, never
+  // a value gated on the previous step (a stale reference once completed a
+  // step instantly, 6x overshoot)
+  ref_yaw_ = hub_yaw();
+  const auto & o = hub_->odom_base_.getOrigin();
+  ref_x_ = o.x();
+  ref_y_ = o.y();
+  head_x_ = std::cos(ref_yaw_);
+  head_y_ = std::sin(ref_yaw_);
+  step_active_ = true;
+  // WALL clock for step timeouts: the node clock follows sim time, and a
+  // sim pause/step (Gazebo GUI) or clock jump made a 20 s timeout fire
+  // after just ~4 s of rotation, aborting a 90-degree spin at half travel
+  // and sending the drive off diagonally (2026-10-24: "spin done
+  // 0.876/1.571" -> error exploded 0.04 -> 1.0 m)
+  step_t0_wall_ = std::chrono::steady_clock::now();
   step_t0_ = node->now();
-  result_arrived_ = false;
-  status_polling_ = false;
-  phase_ = Phase::AWAIT_ACCEPT;
   return BT::NodeStatus::RUNNING;
 }
 
@@ -131,158 +114,74 @@ MicroAdjustment::poll_step()
   rclcpp::Node::SharedPtr node;
   config().blackboard->get("node", node);
 
-  // direct-rotation steps: close the loop on our own odometry
-  if (current_.type == Step::Type::SPIN && spin_active_) {
-    double delta = hub_yaw() - spin_start_yaw_;
+  geometry_msgs::msg::Twist t;
+
+  if (current_.type == Step::Type::SPIN) {
+    double delta = hub_yaw() - ref_yaw_;
     delta = std::atan2(std::sin(delta), std::cos(delta));
+    const double elapsed =
+      std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - step_t0_wall_).count();
     if (std::fabs(delta) >= std::fabs(current_.value) - 0.004 ||
-      (node->now() - step_t0_).seconds() > 20.0)
+      elapsed > 40.0)
     {
-      geometry_msgs::msg::Twist zero;
-      vel_pub_->publish(zero);
-      spin_active_ = false;
+      vel_pub_->publish(t);   // zero
+      step_active_ = false;
+      settle_until_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
       RCLCPP_INFO(
         node->get_logger(), "micro spin done: %.3f/%.3f rad",
         delta, current_.value);
-      phase_ = Phase::IDLE;
       return BT::NodeStatus::RUNNING;   // next step (or drain)
     }
-    geometry_msgs::msg::Twist t;
-    t.angular.z = (current_.value > 0 ? 0.3 : -0.3);
+    // gentle: rotation slip-drift scales with speed (0.3 rad/s drifted the
+    // base ~2.5 cm per +-90 deg pair, keeping the loop ~5 cm from target)
+    t.angular.z = (current_.value > 0 ? 0.2 : -0.2);
     vel_pub_->publish(t);
     return BT::NodeStatus::RUNNING;
   }
 
-  // phase 1: goal acceptance (non-blocking)
-  if (phase_ == Phase::AWAIT_ACCEPT) {
-    if (current_.type == Step::Type::SPIN) {
-      if (spin_accept_fut_.valid() &&
-        spin_accept_fut_.wait_for(0s) == std::future_status::ready)
-      {
-        spin_handle_ = spin_accept_fut_.get();
-      }
-    } else if (current_.type == Step::Type::DRIVE) {
-      if (drive_accept_fut_.valid() &&
-        drive_accept_fut_.wait_for(0s) == std::future_status::ready)
-      {
-        drive_handle_ = drive_accept_fut_.get();
-      }
-    } else {
-      if (backup_accept_fut_.valid() &&
-        backup_accept_fut_.wait_for(0s) == std::future_status::ready)
-      {
-        backup_handle_ = backup_accept_fut_.get();
-      }
-    }
+  // DRIVE / BACK: displacement projected on the heading captured at start
+  const auto & o = hub_->odom_base_.getOrigin();
+  const double along = (o.x() - ref_x_) * head_x_ + (o.y() - ref_y_) * head_y_;
+  const double sign = (current_.type == Step::Type::BACK) ? -1.0 : 1.0;
+  const double prog = along * sign;
 
-    const bool accepted =
-      (current_.type == Step::Type::SPIN && spin_handle_) ||
-      (current_.type == Step::Type::DRIVE && drive_handle_) ||
-      (current_.type == Step::Type::BACK && backup_handle_);
-    if (!accepted) {
-      if ((node->now() - step_t0_).seconds() > 10.0) {   // acceptance timeout
-        RCLCPP_WARN(node->get_logger(), "micro step acceptance timeout");
-        // reset the step state so a parent retry starts clean instead of
-        // instantly re-timing-out on this stale timestamp
-        phase_ = Phase::IDLE;
-        spin_handle_ = nullptr;
-        drive_handle_ = nullptr;
-        backup_handle_ = nullptr;
-        return BT::NodeStatus::FAILURE;
-      }
-      return BT::NodeStatus::RUNNING;
-    }
-    phase_ = Phase::AWAIT_RESULT;
+  if (prog >= std::fabs(current_.value) - 0.004) {
+    vel_pub_->publish(t);   // zero
+    step_active_ = false;
+    settle_until_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    RCLCPP_INFO(
+      node->get_logger(), "micro %s done: %.3f/%.3f m",
+      current_.type == Step::Type::BACK ? "back" : "drive",
+      prog, current_.value);
+    return BT::NodeStatus::RUNNING;   // next step (or drain)
   }
-
-  int8_t status = -1;
-  // phase 2: result - request it once, then poll the future (the handle's
-  // status only updates after the result request is in flight)
-  if (current_.type == Step::Type::SPIN && spin_handle_) {
-    if (!spin_result_fut_.valid()) {
-      spin_result_fut_ = spin_client_->async_get_result(spin_handle_);
-      return BT::NodeStatus::RUNNING;
-    }
-    if (spin_result_fut_.wait_for(0s) != std::future_status::ready) {
-      return BT::NodeStatus::RUNNING;
-    }
-    spin_result_fut_.get();
-    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
-    status = spin_handle_->get_status();
-  } else if (current_.type == Step::Type::DRIVE && drive_handle_) {
-    if (!drive_result_fut_.valid()) {
-      drive_result_fut_ = drive_client_->async_get_result(drive_handle_);
-      return BT::NodeStatus::RUNNING;
-    }
-    if (drive_result_fut_.wait_for(0s) != std::future_status::ready) {
-      return BT::NodeStatus::RUNNING;
-    }
-    drive_result_fut_.get();
-    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
-    status = drive_handle_->get_status();
-  } else if (current_.type == Step::Type::BACK && backup_handle_) {
-    if (!backup_result_fut_.valid()) {
-      backup_result_fut_ = backup_client_->async_get_result(backup_handle_);
-      return BT::NodeStatus::RUNNING;
-    }
-    if (backup_result_fut_.wait_for(0s) != std::future_status::ready) {
-      return BT::NodeStatus::RUNNING;
-    }
-    backup_result_fut_.get();
-    if (!status_polling_) {status_polling_ = true; status_t0_ = node->now();}
-    status = backup_handle_->get_status();
-  } else {
-    return BT::NodeStatus::RUNNING;
-  }
-
-  const bool status_terminal =
-    status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED ||
-    status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
-    status == action_msgs::msg::GoalStatus::STATUS_CANCELED;
-  if (!status_terminal) {
-    if ((node->now() - status_t0_).seconds() < 2.0) {
-      return BT::NodeStatus::RUNNING;   // status topic lagging the result
-    }
+  if (std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - step_t0_wall_).count() > 40.0)
+  {
+    vel_pub_->publish(t);
+    step_active_ = false;
     RCLCPP_WARN(
-      node->get_logger(),
-      "micro step: status never arrived (last %d) - assuming success", status);
-    status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
-  }
-
-  // Abandoned steps must be CANCELED server-side: the status topic on this
-  // host lags the result, and walking away while the action still runs lets
-  // it keep driving the base (measured: a lateral step ran away by >2 m and
-  // blew the error up mid-loop, virtual-robot log 2026-10-22). Canceling an
-  // already-terminal goal is a harmless no-op.
-  if (current_.type == Step::Type::DRIVE && drive_handle_) {
-    drive_client_->async_cancel_goal(drive_handle_);
-  } else if (current_.type == Step::Type::BACK && backup_handle_) {
-    backup_client_->async_cancel_goal(backup_handle_);
-  } else if (current_.type == Step::Type::SPIN && spin_handle_) {
-    spin_client_->async_cancel_goal(spin_handle_);
-  }
-
-  spin_handle_ = nullptr;
-  drive_handle_ = nullptr;
-  backup_handle_ = nullptr;
-  phase_ = Phase::IDLE;
-
-  if (status != action_msgs::msg::GoalStatus::STATUS_SUCCEEDED) {
-    RCLCPP_WARN(node->get_logger(), "micro step aborted (status %d)", status);
+      node->get_logger(), "micro %s stalled at %.3f/%.3f m (base not moving?)",
+      current_.type == Step::Type::BACK ? "back" : "drive",
+      prog, current_.value);
     return BT::NodeStatus::FAILURE;
   }
-  return BT::NodeStatus::RUNNING;   // next tick sends the next step (or drains)
+  t.linear.x = sign * step_speed_;
+  vel_pub_->publish(t);
+  return BT::NodeStatus::RUNNING;
 }
 
 void
 MicroAdjustment::halt()
 {
+  if (step_active_) {
+    geometry_msgs::msg::Twist zero;
+    vel_pub_->publish(zero);
+  }
+  step_active_ = false;
   plan_.clear();
   started_ = false;
-  phase_ = Phase::IDLE;
-  spin_handle_ = nullptr;
-  drive_handle_ = nullptr;
-  backup_handle_ = nullptr;
 }
 
 BT::NodeStatus
@@ -300,12 +199,20 @@ MicroAdjustment::tick()
     if (plan_.empty()) {started_ = false; return BT::NodeStatus::SUCCESS;}
   }
 
-  if (phase_ == Phase::IDLE) {
-    // reset started_ on completion: the NEXT activation (after the parent's
-    // re-measurement) must rebuild from fresh ports - a lingering true flag
-    // made every later activation return SUCCESS instantly without
-    // correcting (the microsecond retry burst, virtual-robot log 2026-10-22)
+  if (!step_active_) {
+    // plan drains -> SUCCESS: the NEXT activation (after the parent's
+    // re-measurement) rebuilds from fresh ports - a lingering started_
+    // made every later activation return SUCCESS instantly (the
+    // microsecond retry burst, virtual-robot log 2026-10-22)
     if (plan_.empty()) {started_ = false; return BT::NodeStatus::SUCCESS;}
+    // settle pause between steps: let the base stop moving before the next
+    // step snapshots its reference pose (a mid-settle snapshot once aimed a
+    // drive several degrees off)
+    if (std::chrono::steady_clock::now() < settle_until_) {
+      geometry_msgs::msg::Twist zero;
+      vel_pub_->publish(zero);
+      return BT::NodeStatus::RUNNING;
+    }
     current_ = plan_.front();
     plan_.pop_front();
     return start_step();
