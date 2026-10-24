@@ -1,0 +1,90 @@
+== [1/5] simulation ==
+   /scan_raw streaming after 8s
+   sim usable (laser + controllers)
+== [2/5] odometry gate (SINGLE SOURCE) ==
+   wheel odom dead -> ground-truth relay fallback
+   /odom OK
+   native odom->base TF present - GT bridge NOT started (single source)
+== Nav2 (be patient: up to 3 min under boot contention) ==
+map_server: ACTIVE
+amcl: ACTIVE
+controller_server: ACTIVE
+planner_server: ACTIVE
+smoother_server: ACTIVE
+behavior_server: ACTIVE
+waypoint_follower: ACTIVE
+velocity_smoother: ACTIVE
+bt_navigator: ACTIVE
+== [4/5] AMCL seed (robot spawns at map origin) ==
+   seeded (0,0,0) - persistent best-effort publisher
+   local costmap: no update in 25 s (continuing with caution)
+   controller_server: ACTIVE
+   warm-up goal finished
+   controller after warm-up: ALIVE
+   amcl particle updates during warm-up: 3
+   warm-up survived - controller past its first goal, AMCL filter updating
+== [5/5] parking demo ==
+[INFO] [1792851599.927563236] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792851600.061983977] [parking_bt]: "DockApproach" BtActionNode initialized
+[INFO] [1792851600.069159759] [parking_bt]: Waiting for "backup" action server
+[INFO] [1792851600.069437437] [parking_bt]: "Backup" BtActionNode initialized
+[INFO] [1792851600.070345981] [parking_bt]: parking BT started (/home/qx/Codes/Ros2/bookros2_ws/install/wr_bringup/share/wr_bringup/behavior_tree_xml/parking.xml)
+[INFO] [1792851600.070493879] [parking_bt]: dock pose: (2.27, -0.90)
+[INFO] [1792851600.076856565] [parking_bt]: Waiting for "navigate_to_pose" action server
+[INFO] [1792851601.170466195] [parking_bt]: dock approach: 1.57 m from dock
+[INFO] [1792851601.870462885] [parking_bt]: dock approach: 1.40 m from dock
+[INFO] [1792851603.270473382] [parking_bt]: dock approach: 1.12 m from dock
+[INFO] [1792851604.570459226] [parking_bt]: dock approach: 0.85 m from dock
+[INFO] [1792851604.570574250] [parking_bt]: dock approach: 0.85 m (< 1.00) -> creep zone (slow controller)
+[INFO] [1792851605.870473210] [parking_bt]: dock approach: 0.58 m from dock
+[INFO] [1792851607.170462621] [parking_bt]: dock approach: 0.34 m from dock
+[INFO] [1792851608.070688478] [parking_bt]: dock navigation succeeded (0.34 m from dock)
+[INFO] [1792851608.071024982] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=111.4 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.091 result_yaw=-0.248
+[INFO] [1792851608.071067125] [parking_bt]: tolerance check: pos 0.2171 m (lon -0.200, lat -0.084, tol 0.020), yaw -0.1456 rad (tol 0.0087)
+[INFO] [1792851608.071106363] [parking_bt]: error calc: lon -0.2003, lat -0.0837, yaw -0.1456 -> yaw (-0.1456)
+[INFO] [1792851608.071195065] [parking_bt]: micro adjustment: yaw err -0.1456 -> 1 step(s)
+[INFO] [1792851610.270572333] [parking_bt]: micro spin done: 0.072/0.073 rad
+[INFO] [1792851610.370680398] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=113.6 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.167 result_yaw=-0.172
+[INFO] [1792851610.370768249] [parking_bt]: tolerance check: pos 0.2199 m (lon -0.204, lat -0.083, tol 0.020), yaw -0.0697 rad (tol 0.0087)
+[INFO] [1792851610.370838836] [parking_bt]: error calc: lon -0.2038, lat -0.0827, yaw -0.0697 -> vector (+0.2199)
+[INFO] [1792851610.370980286] [parking_bt]: micro adjustment: vector err +0.2199 -> 3 step(s)
+[INFO] [1792851621.370566290] [parking_bt]: micro spin done: 0.455/0.455 rad
+[INFO] [1792851636.970556785] [parking_bt]: micro drive done: 0.162/0.165 m
+[INFO] [1792851649.470606234] [parking_bt]: micro spin done: -0.451/-0.455 rad
+[INFO] [1792851649.570644973] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=152.7 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.221 result_yaw=-0.118
+[INFO] [1792851649.570720725] [parking_bt]: tolerance check: pos 0.0829 m (lon -0.080, lat -0.021, tol 0.020), yaw -0.0157 rad (tol 0.0087)
+[INFO] [1792851649.570762407] [parking_bt]: error calc: lon -0.0801, lat -0.0214, yaw -0.0157 -> vector (+0.0829)
+[INFO] [1792851649.570855658] [parking_bt]: micro adjustment: vector err +0.0829 -> 3 step(s)
+[INFO] [1792851656.570558660] [parking_bt]: micro spin done: 0.276/0.276 rad
+[INFO] [1792851662.670595969] [parking_bt]: micro drive done: 0.059/0.062 m
+[INFO] [1792851670.670595665] [parking_bt]: micro spin done: -0.276/-0.276 rad
+[INFO] [1792851670.770632326] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=173.9 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.238 result_yaw=-0.101
+[INFO] [1792851670.770703951] [parking_bt]: tolerance check: pos 0.0402 m (lon -0.039, lat -0.008, tol 0.020), yaw +0.0013 rad (tol 0.0087)
+[INFO] [1792851670.770741513] [parking_bt]: error calc: lon -0.0393, lat -0.0085, yaw +0.0013 -> vector (+0.0402)
+[INFO] [1792851670.770827528] [parking_bt]: micro adjustment: vector err +0.0402 -> 3 step(s)
+[INFO] [1792851676.270542691] [parking_bt]: micro spin done: 0.209/0.211 rad
+[INFO] [1792851679.370546247] [parking_bt]: micro drive done: 0.026/0.030 m
+[INFO] [1792851685.670571521] [parking_bt]: micro spin done: -0.210/-0.211 rad
+[INFO] [1792851685.770705341] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=188.8 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.246 result_yaw=-0.093
+[INFO] [1792851685.770778979] [parking_bt]: tolerance check: pos 0.0274 m (lon -0.027, lat -0.004, tol 0.020), yaw +0.0097 rad (tol 0.0087)
+[INFO] [1792851685.770828720] [parking_bt]: error calc: lon -0.0270, lat -0.0044, yaw +0.0097 -> vector (+0.0274)
+[INFO] [1792851685.770918925] [parking_bt]: micro adjustment: vector err +0.0274 -> 3 step(s)
+[INFO] [1792851689.970609816] [parking_bt]: micro spin done: 0.152/0.153 rad
+[INFO] [1792851692.270545596] [parking_bt]: micro drive done: 0.018/0.021 m
+[INFO] [1792851697.070540718] [parking_bt]: micro spin done: -0.152/-0.153 rad
+[INFO] [1792851697.170624351] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=200.2 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.253 result_yaw=-0.086
+[INFO] [1792851697.170694696] [parking_bt]: tolerance check: pos 0.0205 m (lon -0.020, lat -0.003, tol 0.020), yaw +0.0167 rad (tol 0.0087)
+[INFO] [1792851697.170730647] [parking_bt]: error calc: lon -0.0203, lat -0.0026, yaw +0.0167 -> yaw (+0.0167)
+[INFO] [1792851697.170810781] [parking_bt]: micro adjustment: yaw err +0.0167 -> 1 step(s)
+[INFO] [1792851698.070558943] [parking_bt]: micro spin done: -0.007/-0.008 rad
+[INFO] [1792851698.170599847] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=201.2 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.237 result_yaw=-0.102
+[INFO] [1792851698.170666908] [parking_bt]: tolerance check: pos 0.0213 m (lon -0.021, lat -0.003, tol 0.020), yaw +0.0007 rad (tol 0.0087)
+[INFO] [1792851698.170703548] [parking_bt]: error calc: lon -0.0211, lat -0.0026, yaw +0.0007 -> vector (+0.0213)
+[INFO] [1792851698.170790943] [parking_bt]: micro adjustment: vector err +0.0213 -> 3 step(s)
+[INFO] [1792851701.670585558] [parking_bt]: micro spin done: 0.120/0.121 rad
+[INFO] [1792851703.470639734] [parking_bt]: micro drive done: 0.012/0.016 m
+[INFO] [1792851707.470558552] [parking_bt]: micro spin done: -0.120/-0.121 rad
+[INFO] [1792851707.570621286] [parking_bt]: compose diag: frozen=1 cached=1 odom_stamp=210.5 amcl=1 map_odom_yaw=-0.339 ob_yaw=+0.242 result_yaw=-0.097
+[INFO] [1792851707.570691270] [parking_bt]: tolerance check: pos 0.0181 m (lon -0.018, lat -0.002, tol 0.020), yaw +0.0059 rad (tol 0.0087)
+[INFO] [1792851707.570754856] [parking_bt]: STABLE DOCK: 5 consecutive frames within tol (pos 0.0181 m, yaw +0.0059 rad)
+[INFO] [1792851707.570952625] [parking_bt]: parking BT finished: SUCCESS after 107 s

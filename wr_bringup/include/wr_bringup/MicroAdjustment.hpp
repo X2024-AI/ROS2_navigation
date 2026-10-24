@@ -45,8 +45,11 @@ public:
   static BT::PortsList providedPorts()
   {
     return {
-      BT::InputPort<std::string>("correction", "lateral|longitudinal|yaw|none (from CalcPoseError)"),
+      BT::InputPort<std::string>("correction", "vector|lateral|longitudinal|yaw|none (from CalcPoseError)"),
       BT::InputPort<double>("magnitude", "signed error of the chosen term"),
+      BT::InputPort<double>("lon", 0.0, "signed longitudinal error (vector correction)"),
+      BT::InputPort<double>("lat", 0.0, "signed lateral error (vector correction)"),
+      BT::InputPort<double>("yaw_err", 0.0, "signed yaw error (vector correction)"),
       BT::InputPort<double>("pos_tol", 0.02, "position tolerance in metres"),
       BT::InputPort<double>("yaw_tol", 0.00873, "yaw tolerance in radians"),
       BT::InputPort<double>("speed", 0.05, "translation speed of a micro move, m/s")

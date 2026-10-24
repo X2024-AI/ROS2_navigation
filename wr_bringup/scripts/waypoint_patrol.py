@@ -12,13 +12,17 @@ from geometry_msgs.msg import PoseStamped
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
 # (x, y) in the map frame, in patrol order — a loop ending near the start.
+# 2026-10-24: re-expressed after the map-frame correction (the map image was
+# rotated ~26.5 deg + shifted vs the Gazebo world; every surveyed pose was
+# transformed by the same measured world<-map transform, so these are the
+# SAME physical spots as the benchmark runs used).
 WAYPOINTS = [
-    (1.98, -0.70),    # 1: upper room, right side
-    (-3.25, -3.40),   # 2: below the interior wall
-    (-7.65, -8.05),   # 3: far lower-left corner
-    (-2.26, -9.59),   # 4: along the bottom, left of the table column
-    (0.07, -5.86),    # 5: center
-    (0.15, 0.70),     # 6: home, near the start pose (0, 0)
+    (2.041, -0.993),   # 1: upper room, right side (was 1.98, -0.70)
+    (-1.434, -5.743),  # 2: below the interior wall (was -3.25, -3.40)
+    (-3.297, -11.868),  # 3: far lower-left corner (was -7.65, -8.05)
+    (2.214, -10.841),  # 4: along the bottom, left of the table column (was -2.26, -9.59)
+    (2.634, -6.463),   # 5: center (was 0.07, -5.86)
+    (-0.221, -0.557),  # 6: home, near the start pose (was 0.15, 0.70)
 ]
 
 

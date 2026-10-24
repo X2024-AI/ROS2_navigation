@@ -56,6 +56,15 @@ public:
   tf2::Transform map_base_amcl_;
   bool amcl_received_{false};
 
+  // map->odom derived IN the amcl_pose callback by pairing that pose with
+  // the odom sample current at the same instant (both streams live) - zero
+  // cross-sample staleness. The shared TF buffer's map->odom can be epochs
+  // old if its reader stalls (measured 34 deg stale on 2026-10-24: that
+  // frozen cache rotated the micro-loop's frame and lateral sidesteps
+  // landed on the lon axis).
+  tf2::Transform map_odom_paired_{};
+  bool map_odom_paired_valid_{false};
+
   // KEEP the subscription objects alive: an unstored create_subscription
   // return value is destroyed immediately (node holds only weak refs) and
   // the callbacks never fire

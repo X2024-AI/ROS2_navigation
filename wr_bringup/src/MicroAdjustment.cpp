@@ -44,7 +44,29 @@ MicroAdjustment::build_plan()
   const double min_pos_step = pos_tol / 2.0;
   const double min_yaw_step = yaw_tol / 2.0;
 
-  if (type == "lateral") {
+  if (type == "vector") {
+    // ONE rotation pair for the whole position error: face the bearing to
+    // the target, drive 3/4 of the distance, rotate back. Axis-split
+    // corrections each paid the +-90 deg spin-pair slip-drift tax and
+    // see-sawed at ~2x that drift.
+    double lon = 0.0, lat = 0.0, yaw_err = 0.0;
+    getInput("lon", lon);
+    getInput("lat", lat);
+    getInput("yaw_err", yaw_err);
+    const double r = std::hypot(lon, lat);
+    const double step = std::max(0.75 * r, min_pos_step);
+    // move = -(lon, lat) in the dock frame; robot heading ~= dock axis
+    double beta = std::atan2(-lat, -lon) - yaw_err;
+    bool back = false;
+    if (std::fabs(beta) > M_PI / 2.0) {
+      // target lies behind: face the opposite way and reverse
+      beta += (beta > 0.0 ? -M_PI : M_PI);
+      back = true;
+    }
+    plan_.push_back({Step::Type::SPIN, beta});
+    plan_.push_back({back ? Step::Type::BACK : Step::Type::DRIVE, step});
+    plan_.push_back({Step::Type::SPIN, -beta});
+  } else if (type == "lateral") {
     // 3/4-error step: in-place spins slip-drift the base ~2.5 cm per
     // lateral cycle on this floor (measured 2026-10-24), so half-error
     // steps asymptote at ~2x drift and stall ~5 cm out; a larger fraction

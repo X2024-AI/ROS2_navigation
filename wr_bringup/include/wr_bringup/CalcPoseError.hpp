@@ -33,8 +33,11 @@ public:
       BT::InputPort<geometry_msgs::msg::PoseStamped>("dock", "dock pose"),
       BT::InputPort<double>("pos_tol", 0.02, "position tolerance in metres"),
       BT::InputPort<double>("yaw_tol", 0.00873, "yaw tolerance in radians"),
-      BT::OutputPort<std::string>("correction", "lateral|longitudinal|yaw|none"),
-      BT::OutputPort<double>("magnitude", "signed error of the chosen term")
+      BT::OutputPort<std::string>("correction", "vector|yaw|none"),
+      BT::OutputPort<double>("magnitude", "signed error of the chosen term"),
+      BT::OutputPort<double>("lon", "signed longitudinal error, m"),
+      BT::OutputPort<double>("lat", "signed lateral error, m"),
+      BT::OutputPort<double>("yaw_err", "signed yaw error, rad")
     };
   }
 

@@ -45,24 +45,21 @@ CalcPoseError::tick()
   }
   const DockFrameError e = compute_dock_frame_error(dock, map_base);
 
-  // Priority: largest error RELATIVE to its tolerance first (a 47 cm
-  // longitudinal offset outranks a 3 cm lateral one; ordering self-selects
-  // as the loop converges).
-  const double n_lat = std::fabs(e.lateral) / pos_tol;
-  const double n_lon = std::fabs(e.longitudinal) / pos_tol;
+  // Priority: yaw only when it dominates; otherwise ONE VECTOR correction
+  // for the whole position error (bearing + distance). Axis-split
+  // corrections each paid the +-90 deg spin-pair slip-drift tax (~2.5 cm)
+  // and see-sawed at ~2x that drift, never reaching a 2 cm tolerance.
+  const double n_pos = std::hypot(e.longitudinal, e.lateral) / pos_tol;
   const double n_yaw = std::fabs(e.yaw) / yaw_tol;
 
   std::string type = "none";
   double magnitude = 0.0;
-  if (n_lat >= n_lon && n_lat >= n_yaw && n_lat > 1.0) {
-    type = "lateral";
-    magnitude = e.lateral;             // + : robot left of axis -> move right
-  } else if (n_lon >= n_lat && n_lon >= n_yaw && n_lon > 1.0) {
-    type = "longitudinal";
-    magnitude = e.longitudinal;        // + : robot ahead -> move back
-  } else if (n_yaw > 1.0) {
+  if (n_yaw > 1.0 && n_yaw >= n_pos) {
     type = "yaw";
     magnitude = e.yaw;                 // + : rotated CCW -> spin CW
+  } else if (n_pos > 1.0) {
+    type = "vector";
+    magnitude = std::hypot(e.longitudinal, e.lateral);
   }
 
   RCLCPP_INFO(
@@ -72,6 +69,9 @@ CalcPoseError::tick()
 
   setOutput("correction", type);
   setOutput("magnitude", magnitude);
+  setOutput("lon", e.longitudinal);
+  setOutput("lat", e.lateral);
+  setOutput("yaw_err", e.yaw);
   return BT::NodeStatus::SUCCESS;
 }
 

@@ -70,6 +70,13 @@ void attach_odom_source(
       tf2::fromMsg(msg->pose.pose, mb);
       freezer.map_base_amcl_ = mb;
       freezer.amcl_received_ = true;
+      // pair this amcl pose with the odom sample current at the same
+      // instant (odom at 50 Hz -> <=10 ms skew): the exact map->odom at
+      // this moment, immune to every staleness source
+      if (freezer.odom_received_) {
+        freezer.map_odom_paired_ = mb * freezer.odom_base_.inverse();
+        freezer.map_odom_paired_valid_ = true;
+      }
     });
 
   // self-healing watchdog: wheel odometry streams continuously (even at
@@ -123,23 +130,28 @@ bool compose_map_base(
   config.blackboard->get("odom_frozen", frozen);
 
   if (!frozen || !freezer.cached_) {
-    // Cache the CURRENT map->odom correction, taken from TF. The map->odom
-    // VALUE only changes when the filter corrects (odom carries the motion),
-    // so it never bakes in robot motion between samples. The previous
-    // construction - (last /amcl_pose topic sample) x (odom at freeze)^-1 -
-    // did exactly that: AMCL publishes only every update_min_d (0.25 m), so
-    // the final creep's motion and yaw change entered the cache, producing
-    // a skewed fictional frame (M6 2026-10-24: the tree read lon -0.05 m
-    // while live TF said -0.47 m and ground truth -0.38 m; lateral
-    // sidesteps landed on the lon axis - a ~90 deg frame rotation).
+    // Cache the CURRENT map->odom correction. Preferred source: the
+    // PAIRED sample (amcl_pose x odom^-1 computed in the amcl callback at
+    // the same instant) - exact and stall-free. The TF buffer's map->odom
+    // is only a fallback: on this host the shared buffer's reader can lag
+    // epochs behind AMCL's live corrections (2026-10-24: a 34 deg-stale
+    // buffer cache rotated the micro-loop frame - lateral sidesteps landed
+    // on the lon axis and the loop limit-cycled at 0.13 m).
     bool ok = false;
-    try {
-      auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
-      tf2::fromMsg(m.transform, freezer.map_odom_);
+    if (freezer.map_odom_paired_valid_) {
+      freezer.map_odom_ = freezer.map_odom_paired_;
       freezer.cached_ = true;
       ok = true;
-    } catch (const tf2::TransformException &) {
-      // no TF - try the topic-sample fallback below
+    }
+    if (!ok) {
+      try {
+        auto m = tf_buffer.lookupTransform("map", "odom", tf2::TimePointZero);
+        tf2::fromMsg(m.transform, freezer.map_odom_);
+        freezer.cached_ = true;
+        ok = true;
+      } catch (const tf2::TransformException &) {
+        // no TF - try the stale topic-sample fallback below
+      }
     }
     if (!ok) {
       if (freezer.amcl_received_ && freezer.odom_received_) {
@@ -149,7 +161,7 @@ bool compose_map_base(
       } else {
         RCLCPP_WARN(
           config.blackboard->get<rclcpp::Node::SharedPtr>("node")->get_logger(),
-          "compose: no map->odom TF and no amcl sample yet (frozen=%d amcl=%d odom=%d)",
+          "compose: no paired map->odom, no TF and no amcl sample yet (frozen=%d amcl=%d odom=%d)",
           frozen, freezer.amcl_received_, freezer.odom_received_);
         return false;
       }
